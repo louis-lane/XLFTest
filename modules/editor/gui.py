@@ -10,6 +10,7 @@ from utils.shared import get_target_language
 import shutil
 import re
 import threading
+import os
 
 class EditorTab(ttk.Frame):
     def __init__(self, parent):
@@ -19,21 +20,17 @@ class EditorTab(ttk.Frame):
         self.file_map = {} 
         
         # --- MAIN LAYOUT: 3 PANES (Sidebar | Grid | Editor) ---
-        
-        # 1. Main Horizontal Split: [Sidebar] | [Content Area]
         self.main_split = tk_ttk.PanedWindow(self, orient=HORIZONTAL)
         self.main_split.pack(fill=BOTH, expand=True, padx=5, pady=5)
 
-        # 2. LEFT SIDEBAR (Project Explorer)
+        # 1. LEFT SIDEBAR
         self.sidebar_frame = ttk.Frame(self.main_split)
         self.main_split.add(self.sidebar_frame, weight=1)
         
-        # Sidebar Controls
         sb_controls = ttk.Frame(self.sidebar_frame)
         sb_controls.pack(fill=X, pady=(0, 5))
         ttk.Button(sb_controls, text="📂 Open Project", command=self.load_project_folder, bootstyle="info-outline").pack(fill=X)
 
-        # File Tree
         self.file_tree = ttk.Treeview(self.sidebar_frame, show="tree headings", selectmode="browse")
         self.file_tree.heading("#0", text="Project Files")
         
@@ -44,11 +41,11 @@ class EditorTab(ttk.Frame):
         self.file_tree.pack(side=LEFT, fill=BOTH, expand=True)
         self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
 
-        # 3. RIGHT CONTENT AREA (Holds Search Bar + Grid + Editor)
+        # 2. RIGHT CONTENT AREA
         self.content_area = ttk.Frame(self.main_split)
         self.main_split.add(self.content_area, weight=4)
 
-        # --- TOP CONTROLS (SEARCH & FILTER) ---
+        # --- TOP CONTROLS ---
         top_controls = ttk.Frame(self.content_area, padding=(0, 0, 0, 5))
         top_controls.pack(fill=X)
 
@@ -64,11 +61,10 @@ class EditorTab(ttk.Frame):
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
-        # NEW: Find & Replace Button
+        # Find & Replace Button
         ttk.Button(top_controls, text="🔍 Find & Replace", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT)
 
-        # --- EDITOR SPLIT: [Grid] / [Edit Panel] ---
-        # Vertical split inside the right content area
+        # --- EDITOR SPLIT ---
         self.editor_split = tk_ttk.PanedWindow(self.content_area, orient=VERTICAL)
         self.editor_split.pack(fill=BOTH, expand=True)
         
@@ -77,7 +73,7 @@ class EditorTab(ttk.Frame):
         self.editor_split.add(self.grid_frame, weight=2)
         
         cols = ("id", "status", "source", "target")
-        self.tree = ttk.Treeview(self.grid_frame, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(self.grid_frame, columns=cols, show="headings", selectmode="extended") 
         
         self.tree.heading("id", text="ID")
         self.tree.heading("status", text="Status")
@@ -89,7 +85,6 @@ class EditorTab(ttk.Frame):
         self.tree.column("source", width=300)
         self.tree.column("target", width=300)
         
-        # Scrollbar for grid
         grid_scroll = ttk.Scrollbar(self.grid_frame, orient=VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=grid_scroll.set)
         grid_scroll.pack(side=RIGHT, fill=Y)
@@ -101,7 +96,6 @@ class EditorTab(ttk.Frame):
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=1)
         
-        # Layout for Text Boxes
         ttk.Label(self.edit_panel, text="Original Source:", font=("Helvetica", 9, "bold")).pack(anchor=W)
         self.txt_source = tk.Text(self.edit_panel, height=3, bg="white", fg="black", state=DISABLED)
         self.txt_source.pack(fill=X, pady=(0, 5))
@@ -110,7 +104,7 @@ class EditorTab(ttk.Frame):
         self.txt_target = tk.Text(self.edit_panel, height=3, bg="white", fg="black", insertbackground="black")
         self.txt_target.pack(fill=X, pady=(0, 5))
         
-        # Controls (Status Dropdown + Save Button)
+        # Controls
         controls_bot = ttk.Frame(self.edit_panel)
         controls_bot.pack(fill=X, pady=5)
 
@@ -170,11 +164,9 @@ class EditorTab(ttk.Frame):
                 uid = tu.get('id')
                 src_node = tu.find('xliff:source', namespaces=self.namespaces)
                 src = (src_node.text or "") if src_node is not None else ""
-                
                 tgt_node = tu.find('xliff:target', namespaces=self.namespaces)
                 tgt = (tgt_node.text or "") if tgt_node is not None else ""
                 status = tgt_node.get('state', 'new') if tgt_node is not None else 'new'
-                
                 self.data_store.append({'id': uid, 'source': src, 'target': tgt, 'status': status, 'node': tu})
             
             self.apply_filter()
@@ -257,7 +249,7 @@ class EditorTab(ttk.Frame):
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save: {e}")
 
-    # --- ROBUST FIND AND REPLACE LOGIC ---
+    # --- ADVANCED FIND / REPLACE / ROLLBACK ---
     
     def open_find_replace_dialog(self):
         if not self.current_folder:
@@ -266,7 +258,7 @@ class EditorTab(ttk.Frame):
 
         dialog = ttk.Toplevel(self)
         dialog.title("Find & Replace")
-        dialog.geometry("500x550")
+        dialog.geometry("500x650")
         
         # --- INPUTS ---
         ttk.Label(dialog, text="Find what:").pack(anchor=W, padx=10, pady=(10,0))
@@ -283,6 +275,9 @@ class EditorTab(ttk.Frame):
         
         match_case_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="Match Case", variable=match_case_var).pack(anchor=W)
+        
+        exact_match_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Match Whole Content Only", variable=exact_match_var).pack(anchor=W)
         
         regex_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(options_frame, text="Use Regular Expressions", variable=regex_var).pack(anchor=W)
@@ -307,26 +302,13 @@ class EditorTab(ttk.Frame):
         
         ttk.Radiobutton(scope_frame, text="Entire Project (All Files)", variable=scope_var, value="all_files").pack(anchor=W)
 
-        # --- ACTION BUTTONS ---
-        btn_frame = ttk.Frame(dialog)
-        btn_frame.pack(fill=X, padx=10, pady=20)
-        
-        # Progress Bar
+        # --- PROGRESS ---
         progress = ttk.Progressbar(dialog, mode='determinate', bootstyle="success-striped")
-        progress.pack(fill=X, padx=10, pady=(0, 10))
+        progress.pack(fill=X, padx=10, pady=(15, 5))
 
         # --- WORKER LOGIC ---
-        def run_replace_logic(mode="replace"):
-            find_text = entry_find.get()
-            replace_text = entry_replace.get()
+        def get_file_list():
             scope = scope_var.get()
-            match_case = match_case_var.get()
-            use_regex = regex_var.get()
-            make_backup = backup_var.get()
-            
-            if not find_text: return
-
-            # 1. Determine Files
             files_to_process = []
             if scope == "current_file":
                 if self.current_file: files_to_process = [Path(self.current_file)]
@@ -334,32 +316,65 @@ class EditorTab(ttk.Frame):
                 if current_lang in self.file_map: files_to_process = self.file_map[current_lang]
             elif scope == "all_files":
                 for file_list in self.file_map.values(): files_to_process.extend(file_list)
+            return files_to_process
 
+        def run_processing(mode="find"):
+            find_text = entry_find.get()
+            replace_text = entry_replace.get()
+            match_case = match_case_var.get()
+            use_regex = regex_var.get()
+            make_backup = backup_var.get()
+            exact_match = exact_match_var.get()
+            
+            if mode != "rollback" and not find_text: return
+
+            files_to_process = get_file_list()
             if not files_to_process:
                 messagebox.showinfo("Info", "No files selected.")
                 return
 
-            # Prepare Regex Pattern if needed
+            # Regex Prep
             pattern = None
-            if use_regex:
+            if mode != "rollback" and use_regex:
                 try:
                     flags = 0 if match_case else re.IGNORECASE
                     pattern = re.compile(find_text, flags)
                 except re.error as e:
                     messagebox.showerror("Regex Error", f"Invalid Pattern: {e}")
                     return
-            
-            total_occurrences = 0
-            files_modified_count = 0
-            
+
+            total_hits = 0
+            files_mod = 0
+            matches_in_current_file = [] 
+
             progress['maximum'] = len(files_to_process)
             progress['value'] = 0
 
-            # 2. Process Loop
+            # ROLLBACK LOGIC
+            if mode == "rollback":
+                restored_count = 0
+                for idx, file_path in enumerate(files_to_process):
+                    bak_path = Path(str(file_path) + ".bak")
+                    if bak_path.exists():
+                        try:
+                            shutil.copy2(bak_path, file_path)
+                            restored_count += 1
+                        except Exception as e:
+                            print(f"Restore failed: {e}")
+                    progress['value'] = idx + 1
+                    dialog.update_idletasks()
+                
+                messagebox.showinfo("Rollback Complete", f"Restored {restored_count} files from backups.")
+                if self.current_file and any(str(p) == str(self.current_file) for p in files_to_process):
+                    self.load_file(self.current_file)
+                return
+
+            # FIND / REPLACE LOGIC
             for idx, file_path in enumerate(files_to_process):
                 try:
-                    file_modified = False
+                    is_current = (self.current_file and str(file_path) == str(self.current_file))
                     tree = etree.parse(str(file_path))
+                    file_dirty = False
                     
                     for tu in tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
                         tgt_node = tu.find('xliff:target', namespaces=self.namespaces)
@@ -368,67 +383,87 @@ class EditorTab(ttk.Frame):
                             original_text = tgt_node.text
                             new_text = original_text
                             
-                            # Perform Substitution Logic
+                            found = False
+                            
+                            # --- LOGIC SELECTION ---
                             if use_regex:
                                 if pattern.search(original_text):
-                                    if mode == "replace":
-                                        new_text = pattern.sub(replace_text, original_text)
-                                    # Count matches (approximate for regex find)
-                                    total_occurrences += len(pattern.findall(original_text))
+                                    found = True
+                                    if mode == "replace": new_text = pattern.sub(replace_text, original_text)
+                            elif exact_match:
+                                # MATCH WHOLE CONTENT
+                                if match_case:
+                                    if original_text == find_text:
+                                        found = True
+                                        if mode == "replace": new_text = replace_text
+                                else:
+                                    if original_text.lower() == find_text.lower():
+                                        found = True
+                                        if mode == "replace": new_text = replace_text
                             else:
-                                # Standard String Replace
+                                # SUBSTRING SEARCH
                                 if match_case:
                                     if find_text in original_text:
-                                        total_occurrences += original_text.count(find_text)
-                                        if mode == "replace":
-                                            new_text = original_text.replace(find_text, replace_text)
+                                        found = True
+                                        if mode == "replace": new_text = original_text.replace(find_text, replace_text)
                                 else:
-                                    # Case Insensitive Literal Replace
-                                    lower_orig = original_text.lower()
-                                    lower_find = find_text.lower()
-                                    if lower_find in lower_orig:
-                                        total_occurrences += lower_orig.count(lower_find)
+                                    if find_text.lower() in original_text.lower():
+                                        found = True
                                         if mode == "replace":
-                                            # Using regex for case-insensitive literal replacement to preserve case of non-matches
                                             esc_pattern = re.compile(re.escape(find_text), re.IGNORECASE)
                                             new_text = esc_pattern.sub(replace_text, original_text)
 
-                            if new_text != original_text and mode == "replace":
-                                tgt_node.text = new_text
-                                tgt_node.set('state', 'translated')
-                                file_modified = True
+                            if found:
+                                total_hits += 1
+                                if is_current and mode == "find":
+                                    matches_in_current_file.append(tu.get('id'))
 
-                    if file_modified and mode == "replace":
-                        files_modified_count += 1
+                                if mode == "replace" and new_text != original_text:
+                                    tgt_node.text = new_text
+                                    tgt_node.set('state', 'translated')
+                                    file_dirty = True
+
+                    if file_dirty and mode == "replace":
+                        files_mod += 1
                         if make_backup:
                             shutil.copy2(file_path, str(file_path) + ".bak")
                         tree.write(str(file_path), encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
                 except Exception as e:
-                    print(f"Error in {file_path}: {e}")
+                    print(f"Error {file_path}: {e}")
                 
-                # Update Progress (Thread Safe call not strictly needed for Var but good practice)
                 progress['value'] = idx + 1
                 dialog.update_idletasks()
 
-            # 3. Report
-            action_verb = "Replaced" if mode == "replace" else "Found"
-            msg = f"{action_verb} {total_occurrences} occurrences in {len(files_to_process)} files."
+            # RESULTS
             if mode == "replace":
-                msg += f"\nModified {files_modified_count} files."
-            
-            messagebox.showinfo("Result", msg)
-            
-            # Reload if current file was touched
-            if mode == "replace" and self.current_file and any(str(p) == str(self.current_file) for p in files_to_process):
-                self.load_file(self.current_file)
+                messagebox.showinfo("Complete", f"Replaced {total_hits} occurrences.\nModified {files_mod} files.")
+                # Reload if current changed
+                if self.current_file and any(str(p) == str(self.current_file) for p in files_to_process):
+                    self.load_file(self.current_file)
+            elif mode == "find":
+                messagebox.showinfo("Find Results", f"Found {total_hits} matches in {len(files_to_process)} files.")
+                # Highlight in grid if Current File
+                if scope_var.get() == "current_file":
+                    self.tree.selection_remove(self.tree.selection())
+                    for child in self.tree.get_children():
+                        uid = self.tree.item(child, 'values')[0]
+                        if uid in matches_in_current_file:
+                            self.tree.selection_add(child)
+                            self.tree.see(child) 
 
-        # Thread Wrappers
-        def start_replace():
-            threading.Thread(target=lambda: run_replace_logic("replace")).start()
+        # --- BUTTONS ---
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill=X, padx=10, pady=20)
 
-        def start_count():
-            threading.Thread(target=lambda: run_replace_logic("count")).start()
+        # Threading Helpers
+        def thread_find(): threading.Thread(target=lambda: run_processing("find")).start()
+        def thread_replace(): threading.Thread(target=lambda: run_processing("replace")).start()
+        def thread_rollback(): threading.Thread(target=lambda: run_processing("rollback")).start()
 
-        ttk.Button(btn_frame, text="Replace All", command=start_replace, bootstyle="danger").pack(side=RIGHT, padx=5)
-        ttk.Button(btn_frame, text="Count Matches (Dry Run)", command=start_count, bootstyle="info-outline").pack(side=RIGHT, padx=5)
+        ttk.Button(btn_frame, text="Find All", command=thread_find, bootstyle="info-outline").pack(side=LEFT, padx=5)
+        ttk.Button(btn_frame, text="Replace All", command=thread_replace, bootstyle="danger").pack(side=LEFT, padx=5)
+        
+        # Separator / Right Side
+        ttk.Button(btn_frame, text="Close", command=dialog.destroy, bootstyle="secondary").pack(side=RIGHT)
+        ttk.Button(btn_frame, text="Restore Backups", command=thread_rollback, bootstyle="warning-outline").pack(side=RIGHT, padx=20)
