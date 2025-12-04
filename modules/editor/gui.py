@@ -1,4 +1,4 @@
-import tkinter as tk_ttk
+import tkinter as tk
 from tkinter import filedialog, messagebox
 # --- CRITICAL IMPORT: Rename standard ttk so we can use its PanedWindow ---
 from tkinter import ttk as tk_ttk 
@@ -217,3 +217,4 @@ class EditorTab(ttk.Frame):
             self.load_file(self.current_file)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save: {e}")
+
