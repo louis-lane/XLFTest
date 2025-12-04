@@ -512,35 +512,76 @@ class XliffEditorTab(ttk.Frame):
         ttk.Button(controls_frame, text="📂 Open XLIFF", command=self.load_file, bootstyle="info").pack(side=LEFT, padx=(0, 5))
         ttk.Button(controls_frame, text="💾 Save Changes", command=self.save_file, bootstyle="success").pack(side=LEFT, padx=(0, 20))
         
-        # Filter
-        ttk.Label(controls_frame, text="Filter by Status:").pack(side=LEFT, padx=(20, 5))
+        # Search & Filter
+        ttk.Label(controls_frame, text="Search:").pack(side=LEFT, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(controls_frame, textvariable=self.search_var, width=25)
+        self.search_entry.pack(side=LEFT, padx=(0, 10))
+        self.search_entry.bind("<Return>", self.apply_filter)
+        self.search_entry.bind("<KeyRelease>", self.apply_filter)
+        
+        ttk.Label(controls_frame, text="Status:").pack(side=LEFT, padx=(10, 5))
         self.filter_var = tk.StringVar(value="All")
         self.filter_combo = ttk.Combobox(controls_frame, textvariable=self.filter_var, state="readonly", width=15)
         self.filter_combo['values'] = ("All", "New", "Needs Review", "Translated", "Final")
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
-        # --- TABLE VIEW ---
+        # --- PANED WINDOW (Split View) ---
+        self.paned_window = ttk.PanedWindow(self, orient=VERTICAL)
+        self.paned_window.pack(fill=BOTH, expand=True)
+
+        # 1. TOP PANE: TREEVIEW
+        self.tree_frame = ttk.Frame(self.paned_window)
+        self.paned_window.add(self.tree_frame, weight=2)
+
         cols = ("id", "status", "source", "target")
-        self.tree = ttk.Treeview(self, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(self.tree_frame, columns=cols, show="headings", selectmode="browse")
         
         self.tree.heading("id", text="ID")
         self.tree.heading("status", text="Status")
         self.tree.heading("source", text="Original Source")
         self.tree.heading("target", text="Translated Target")
         
-        self.tree.column("id", width=50, stretch=False)
+        self.tree.column("id", width=60, stretch=False)
         self.tree.column("status", width=100, stretch=False)
-        self.tree.column("source", width=300)
-        self.tree.column("target", width=300)
+        self.tree.column("source", width=350)
+        self.tree.column("target", width=350)
         
-        scrollbar = ttk.Scrollbar(self, orient=VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(self.tree_frame, orient=VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
-        
         scrollbar.pack(side=RIGHT, fill=Y)
         self.tree.pack(side=LEFT, fill=BOTH, expand=True)
+        
+        self.tree.bind("<<TreeviewSelect>>", self.on_row_selected)
 
-        self.tree.bind("<Double-1>", self.on_double_click)
+        # 2. BOTTOM PANE: EDITOR PANEL
+        self.editor_frame = ttk.Labelframe(self.paned_window, text="Edit Selected Segment", padding=10, bootstyle="secondary")
+        self.paned_window.add(self.editor_frame, weight=1)
+
+        self.editor_frame.columnconfigure(1, weight=1)
+        self.editor_frame.rowconfigure(1, weight=1)
+        self.editor_frame.rowconfigure(3, weight=1)
+
+        ttk.Label(self.editor_frame, text="Original Source:", font=("Helvetica", 9, "bold")).grid(row=0, column=0, sticky=W, pady=(0,5))
+        # High Contrast Text (White BG, Black Text)
+        self.txt_source = tk.Text(self.editor_frame, height=3, bg="white", fg="black", insertbackground="black", state=DISABLED) 
+        self.txt_source.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+
+        ttk.Label(self.editor_frame, text="Translation Target:", font=("Helvetica", 9, "bold")).grid(row=2, column=0, sticky=W, pady=(0,5))
+        self.txt_target = tk.Text(self.editor_frame, height=3, bg="white", fg="black", insertbackground="black")
+        self.txt_target.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+
+        controls_bot = ttk.Frame(self.editor_frame)
+        controls_bot.grid(row=4, column=0, columnspan=2, sticky="ew")
+
+        ttk.Label(controls_bot, text="Set Status:").pack(side=LEFT)
+        self.edit_status_var = tk.StringVar()
+        self.status_dropdown = ttk.Combobox(controls_bot, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
+        self.status_dropdown.pack(side=LEFT, padx=10)
+
+        ttk.Button(controls_bot, text="Confirm Update", command=self.update_record, bootstyle="success").pack(side=RIGHT)
+        ttk.Button(controls_bot, text="Clear/Revert", command=self.revert_editor, bootstyle="secondary-outline").pack(side=RIGHT, padx=10)
 
     def load_file(self):
         filepath = filedialog.askopenfilename(title="Select XLIFF File", filetypes=[("XLIFF Files", "*.xliff"), ("All Files", "*.*")])
@@ -553,9 +594,13 @@ class XliffEditorTab(ttk.Frame):
             
             for trans_unit in self.xml_tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
                 unit_id = trans_unit.get('id')
-                source_node = trans_unit.find('xliff:source', namespaces=self.namespaces)
-                source_text = source_node.text if source_node is not None else ""
                 
+                # --- FIX: Handle Empty Source Tags safely ---
+                source_node = trans_unit.find('xliff:source', namespaces=self.namespaces)
+                # Use (source_node.text or "") to ensure None becomes ""
+                source_text = (source_node.text or "") if source_node is not None else ""
+                
+                # --- FIX: Handle Empty Target Tags safely ---
                 target_node = trans_unit.find('xliff:target', namespaces=self.namespaces)
                 if target_node is not None:
                     target_text = target_node.text or ""
@@ -582,76 +627,95 @@ class XliffEditorTab(ttk.Frame):
         for item in self.tree.get_children():
             self.tree.delete(item)
             
-        filter_val = self.filter_var.get().lower()
+        status_filter = self.filter_var.get().lower()
+        search_term = self.search_var.get().lower()
         
         for item in self.data_store:
-            if filter_val == "all" or item['status'].lower().replace(" ", "") == filter_val.replace(" ", ""):
+            # Safely get status, defaulting to "new" if missing
+            current_status = str(item.get('status', 'new')).lower()
+            
+            # Check Status Match
+            status_match = (status_filter == "all") or (current_status.replace(" ", "") == status_filter.replace(" ", ""))
+            
+            # Check Search Match (Ensure we search safely on strings)
+            s_source = str(item['source'] or "").lower()
+            s_target = str(item['target'] or "").lower()
+            s_id = str(item['id'] or "").lower()
+            
+            text_match = True
+            if search_term:
+                text_match = (search_term in s_source) or (search_term in s_target) or (search_term in s_id)
+
+            if status_match and text_match:
                 # --- MULTI-LINE FIX ---
-                # Replace newlines with a space for display in the treeview
-                display_source = item['source'].replace('\n', ' ').replace('\r', '')
-                display_target = item['target'].replace('\n', ' ').replace('\r', '')
+                # Ensure we are operating on strings, not None
+                display_source = str(item['source'] or "").replace('\n', ' ').replace('\r', '')
+                display_target = str(item['target'] or "").replace('\n', ' ').replace('\r', '')
                 
-                tag = item['status'].lower().replace(" ", "_")
+                tag = current_status.replace(" ", "_")
                 self.tree.insert("", "end", values=(item['id'], item['status'], display_source, display_target), tags=(tag,))
 
-        # Using brighter colors as requested
+        # Colors
         self.tree.tag_configure('new', foreground='#ff4d4d') 
         self.tree.tag_configure('needs_review', foreground='#ffad33')
         self.tree.tag_configure('translated', foreground='#33cc33')
         self.tree.tag_configure('final', foreground='#3399ff')
 
-    def on_double_click(self, event):
-        item_id = self.tree.selection()
-        if not item_id: return
+    def on_row_selected(self, event):
+        selected_items = self.tree.selection()
+        if not selected_items: return
         
-        item_values = self.tree.item(item_id, 'values')
+        item_values = self.tree.item(selected_items[0], 'values')
         xliff_id = item_values[0]
         
         record = next((r for r in self.data_store if r['id'] == xliff_id), None)
         if record:
-            self.open_edit_dialog(record)
+            self.load_editor_panel(record)
 
-    def open_edit_dialog(self, record):
-        editor = ttk.Toplevel(self)
-        editor.title(f"Edit Segment: {record['id']}")
-        editor.geometry("500x400")
+    def load_editor_panel(self, record):
+        self.current_editing_id = record['id']
         
-        ttk.Label(editor, text="Original Source:", font=("Helvetica", 10, "bold")).pack(anchor=W, padx=10, pady=5)
-        source_txt = tk.Text(editor, height=5, width=50, bg="#f0f0f0")
-        source_txt.insert("1.0", record['source'])
-        source_txt.config(state=DISABLED)
-        source_txt.pack(padx=10, fill=X)
+        self.txt_source.config(state=NORMAL)
+        self.txt_source.delete("1.0", END)
+        self.txt_source.insert("1.0", str(record['source'] or ""))
+        self.txt_source.config(state=DISABLED)
         
-        ttk.Label(editor, text="Translation Target:", font=("Helvetica", 10, "bold")).pack(anchor=W, padx=10, pady=5)
-        target_txt = tk.Text(editor, height=5, width=50)
-        target_txt.insert("1.0", record['target'])
-        target_txt.pack(padx=10, fill=X, expand=True)
+        self.txt_target.delete("1.0", END)
+        self.txt_target.insert("1.0", str(record['target'] or ""))
         
-        ttk.Label(editor, text="Status:", font=("Helvetica", 10, "bold")).pack(anchor=W, padx=10, pady=5)
-        status_var = tk.StringVar(value=record['status'])
-        combo = ttk.Combobox(editor, textvariable=status_var, values=("new", "needs-review", "translated", "final"), state="readonly")
-        combo.pack(padx=10, fill=X)
+        self.edit_status_var.set(record['status'])
+
+    def revert_editor(self):
+        if self.current_editing_id:
+             record = next((r for r in self.data_store if r['id'] == self.current_editing_id), None)
+             if record: self.load_editor_panel(record)
+
+    def update_record(self):
+        if not self.current_editing_id: return
+
+        new_target = self.txt_target.get("1.0", "end-1c")
+        new_status = self.edit_status_var.get()
         
-        def save_edit():
-            new_target = target_txt.get("1.0", "end-1c")
-            new_status = status_var.get()
-            
+        record = next((r for r in self.data_store if r['id'] == self.current_editing_id), None)
+        if record:
             record['target'] = new_target
             record['status'] = new_status
             
             trans_unit = record['xml_node']
             target_node = trans_unit.find('xliff:target', namespaces=self.namespaces)
-            
             if target_node is None:
                 target_node = etree.SubElement(trans_unit, f"{{{self.namespaces['xliff']}}}target")
-            
             target_node.text = new_target
             target_node.set('state', new_status)
             
+            # Refresh View (preserving selection if possible)
             self.apply_filter()
-            editor.destroy()
-
-        ttk.Button(editor, text="Update Segment", command=save_edit, bootstyle="success").pack(pady=10)
+            
+            for child in self.tree.get_children():
+                if str(self.tree.item(child, 'values')[0]) == str(self.current_editing_id):
+                    self.tree.selection_set(child)
+                    self.tree.see(child)
+                    break
 
     def save_file(self):
         if not self.current_file_path or not self.xml_tree:
