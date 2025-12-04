@@ -1,6 +1,5 @@
-name: Build EXE
+name: Build Modular Toolkit
 
-# Trigger the build manually via the "Actions" tab or on push to main
 on:
   workflow_dispatch:
   push:
@@ -11,32 +10,34 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    # 1. Check out your code
+    # 1. Check out the code
     - uses: actions/checkout@v4
 
     # 2. Install Python
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11' # 3.11 is stable for PyInstaller
+        python-version: '3.11' 
 
-    # 3. Install dependencies from requirements.txt
+    # 3. Install dependencies
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 4. Build the EXE using PyInstaller
-    # --onefile: Bundles everything into a single .exe
-    # --noconsole: Prevents the black command window from popping up (since you have a GUI)
-    # --name: Sets the output name
+    # 4. Build the EXE
+    # Note: We point to 'main.py' now. 
+    # PyInstaller automatically finds 'modules/' and 'utils/' because they are imported in main.py
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --name "ConverterApp" ConverterApp.py
+        pyinstaller --onefile --noconsole --name "LocalizationToolkit" main.py
 
-    # 5. Upload the resulting EXE so you can download it
-    - name: Upload EXE Artifact
+    # 5. Upload EXE AND Config
+    # We upload both files so when you download the zip, it's ready to run.
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ConverterApp-EXE
-        path: dist/ConverterApp.exe
+        name: LocalizationToolkit-Release
+        path: |
+          dist/LocalizationToolkit.exe
+          config.json
