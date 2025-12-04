@@ -1,5 +1,5 @@
 name: Build Windows Executable
-working-directory: ./your_subfolder_name  # <--- Add this line
+working-directory: ./windows_build  # <--- Add this line
 on:
   push:
     branches: [ main ]
