@@ -7,6 +7,9 @@ from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
 from utils.shared import get_target_language
+import shutil
+import re
+import threading
 
 class EditorTab(ttk.Frame):
     def __init__(self, parent):
@@ -60,6 +63,9 @@ class EditorTab(ttk.Frame):
         self.filter_combo = ttk.Combobox(top_controls, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=15)
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
+
+        # NEW: Find & Replace Button
+        ttk.Button(top_controls, text="🔍 Find & Replace", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT)
 
         # --- EDITOR SPLIT: [Grid] / [Edit Panel] ---
         # Vertical split inside the right content area
@@ -121,28 +127,25 @@ class EditorTab(ttk.Frame):
         self.data_store = []
         self.current_edit_id = None
 
+    # --- LOADING LOGIC ---
     def load_project_folder(self):
         folder = filedialog.askdirectory()
         if not folder: return
         self.current_folder = Path(folder)
         
-        # Clear Tree
         for i in self.file_tree.get_children(): self.file_tree.delete(i)
         self.file_map = {}
 
-        # Scan XLIFFs
         xliffs = list(self.current_folder.glob("*.xliff"))
         if not xliffs:
             messagebox.showwarning("Empty", "No .xliff files found.")
             return
 
-        # Group by Language (Lazy Load)
         for f in xliffs:
             lang = get_target_language(f)
             if lang not in self.file_map: self.file_map[lang] = []
             self.file_map[lang].append(f)
 
-        # Populate Sidebar
         for lang, files in self.file_map.items():
             lang_node = self.file_tree.insert("", "end", text=lang, open=True)
             for f in files:
@@ -151,10 +154,8 @@ class EditorTab(ttk.Frame):
     def on_file_select(self, event):
         sel = self.file_tree.selection()
         if not sel: return
-        
         item = self.file_tree.item(sel[0])
-        if not item['values']: return # It's a folder node/language group
-        
+        if not item['values']: return 
         file_path = item['values'][0]
         self.load_file(file_path)
 
@@ -163,8 +164,8 @@ class EditorTab(ttk.Frame):
         try:
             self.xml_tree = etree.parse(path)
             self.data_store = []
+            for i in self.tree.get_children(): self.tree.delete(i)
             
-            # Parse XML
             for tu in self.xml_tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
                 uid = tu.get('id')
                 src_node = tu.find('xliff:source', namespaces=self.namespaces)
@@ -176,40 +177,35 @@ class EditorTab(ttk.Frame):
                 
                 self.data_store.append({'id': uid, 'source': src, 'target': tgt, 'status': status, 'node': tu})
             
-            # Populate Grid based on filters
             self.apply_filter()
 
         except Exception as e:
             messagebox.showerror("Error", f"Could not load file: {e}")
 
     def apply_filter(self, event=None):
-        # Clear current Grid
         for i in self.tree.get_children(): self.tree.delete(i)
         
         filter_status = self.filter_var.get().lower()
         search_term = self.search_var.get().lower()
         
         for rec in self.data_store:
-            # 1. Status Filter
             s_status = str(rec['status']).lower()
             if filter_status != "all" and s_status.replace(" ", "") != filter_status.replace(" ", ""):
                 continue
             
-            # 2. Search Filter
             s_src = str(rec['source']).lower()
             s_tgt = str(rec['target']).lower()
             s_id = str(rec['id']).lower()
+            
             if search_term and (search_term not in s_src and search_term not in s_tgt and search_term not in s_id):
                 continue
                 
-            # Add to Grid (Flatten newlines for display)
             display_src = rec['source'].replace('\n', ' ')
             display_tgt = rec['target'].replace('\n', ' ')
             
             tag = s_status.replace(" ", "_")
             self.tree.insert("", "end", values=(rec['id'], rec['status'], display_src, display_tgt), tags=(tag,))
 
-        # Colors
         self.tree.tag_configure('new', foreground='#ff4d4d') 
         self.tree.tag_configure('needs_review', foreground='#ffad33')
         self.tree.tag_configure('translated', foreground='#33cc33')
@@ -223,8 +219,6 @@ class EditorTab(ttk.Frame):
         rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
         if rec:
             self.current_edit_id = uid
-            
-            # Update Text Boxes
             self.txt_source.config(state=NORMAL)
             self.txt_source.delete("1.0", END)
             self.txt_source.insert("1.0", rec['source'])
@@ -232,8 +226,6 @@ class EditorTab(ttk.Frame):
             
             self.txt_target.delete("1.0", END)
             self.txt_target.insert("1.0", rec['target'])
-            
-            # Update Dropdown
             self.edit_status_var.set(rec['status'])
 
     def save_segment(self):
@@ -241,14 +233,12 @@ class EditorTab(ttk.Frame):
         new_txt = self.txt_target.get("1.0", "end-1c")
         new_status = self.edit_status_var.get()
         
-        # Update Memory
         rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
         if not rec: return
         
         rec['target'] = new_txt
         rec['status'] = new_status
         
-        # Update XML Node
         tgt_node = rec['node'].find('xliff:target', namespaces=self.namespaces)
         if tgt_node is None:
             tgt_node = etree.SubElement(rec['node'], f"{{{self.namespaces['xliff']}}}target")
@@ -256,19 +246,189 @@ class EditorTab(ttk.Frame):
         tgt_node.text = new_txt
         tgt_node.set('state', new_status)
         
-        # Save to Disk
         try:
             self.xml_tree.write(self.current_file, encoding="UTF-8", xml_declaration=True, pretty_print=True)
-            
-            # Refresh Grid (keeps filters applied)
             self.apply_filter()
-            
-            # Re-select row to keep focus
             for child in self.tree.get_children():
                 if str(self.tree.item(child, 'values')[0]) == str(self.current_edit_id):
                     self.tree.selection_set(child)
                     self.tree.see(child)
                     break
-                    
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save: {e}")
+
+    # --- ROBUST FIND AND REPLACE LOGIC ---
+    
+    def open_find_replace_dialog(self):
+        if not self.current_folder:
+            messagebox.showwarning("Warning", "Please open a project folder first.")
+            return
+
+        dialog = ttk.Toplevel(self)
+        dialog.title("Find & Replace")
+        dialog.geometry("500x550")
+        
+        # --- INPUTS ---
+        ttk.Label(dialog, text="Find what:").pack(anchor=W, padx=10, pady=(10,0))
+        entry_find = ttk.Entry(dialog)
+        entry_find.pack(fill=X, padx=10, pady=2)
+        
+        ttk.Label(dialog, text="Replace with:").pack(anchor=W, padx=10, pady=(10,0))
+        entry_replace = ttk.Entry(dialog)
+        entry_replace.pack(fill=X, padx=10, pady=2)
+        
+        # --- OPTIONS ---
+        options_frame = ttk.Labelframe(dialog, text="Options", padding=10)
+        options_frame.pack(fill=X, padx=10, pady=10)
+        
+        match_case_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Match Case", variable=match_case_var).pack(anchor=W)
+        
+        regex_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Use Regular Expressions", variable=regex_var).pack(anchor=W)
+        
+        backup_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="Create Backups (.bak)", variable=backup_var).pack(anchor=W)
+
+        # --- SCOPE ---
+        scope_frame = ttk.Labelframe(dialog, text="Scope", padding=10)
+        scope_frame.pack(fill=X, padx=10, pady=5)
+        
+        scope_var = tk.StringVar(value="current_file")
+        current_lang = "Unknown"
+        if self.current_file:
+            current_lang = get_target_language(self.current_file)
+
+        ttk.Radiobutton(scope_frame, text="Current File Only", variable=scope_var, value="current_file").pack(anchor=W)
+        
+        rb_lang = ttk.Radiobutton(scope_frame, text=f"All '{current_lang}' Files", variable=scope_var, value="current_lang")
+        rb_lang.pack(anchor=W)
+        if not self.current_file: rb_lang.config(state=DISABLED)
+        
+        ttk.Radiobutton(scope_frame, text="Entire Project (All Files)", variable=scope_var, value="all_files").pack(anchor=W)
+
+        # --- ACTION BUTTONS ---
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(fill=X, padx=10, pady=20)
+        
+        # Progress Bar
+        progress = ttk.Progressbar(dialog, mode='determinate', bootstyle="success-striped")
+        progress.pack(fill=X, padx=10, pady=(0, 10))
+
+        # --- WORKER LOGIC ---
+        def run_replace_logic(mode="replace"):
+            find_text = entry_find.get()
+            replace_text = entry_replace.get()
+            scope = scope_var.get()
+            match_case = match_case_var.get()
+            use_regex = regex_var.get()
+            make_backup = backup_var.get()
+            
+            if not find_text: return
+
+            # 1. Determine Files
+            files_to_process = []
+            if scope == "current_file":
+                if self.current_file: files_to_process = [Path(self.current_file)]
+            elif scope == "current_lang":
+                if current_lang in self.file_map: files_to_process = self.file_map[current_lang]
+            elif scope == "all_files":
+                for file_list in self.file_map.values(): files_to_process.extend(file_list)
+
+            if not files_to_process:
+                messagebox.showinfo("Info", "No files selected.")
+                return
+
+            # Prepare Regex Pattern if needed
+            pattern = None
+            if use_regex:
+                try:
+                    flags = 0 if match_case else re.IGNORECASE
+                    pattern = re.compile(find_text, flags)
+                except re.error as e:
+                    messagebox.showerror("Regex Error", f"Invalid Pattern: {e}")
+                    return
+            
+            total_occurrences = 0
+            files_modified_count = 0
+            
+            progress['maximum'] = len(files_to_process)
+            progress['value'] = 0
+
+            # 2. Process Loop
+            for idx, file_path in enumerate(files_to_process):
+                try:
+                    file_modified = False
+                    tree = etree.parse(str(file_path))
+                    
+                    for tu in tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
+                        tgt_node = tu.find('xliff:target', namespaces=self.namespaces)
+                        
+                        if tgt_node is not None and tgt_node.text:
+                            original_text = tgt_node.text
+                            new_text = original_text
+                            
+                            # Perform Substitution Logic
+                            if use_regex:
+                                if pattern.search(original_text):
+                                    if mode == "replace":
+                                        new_text = pattern.sub(replace_text, original_text)
+                                    # Count matches (approximate for regex find)
+                                    total_occurrences += len(pattern.findall(original_text))
+                            else:
+                                # Standard String Replace
+                                if match_case:
+                                    if find_text in original_text:
+                                        total_occurrences += original_text.count(find_text)
+                                        if mode == "replace":
+                                            new_text = original_text.replace(find_text, replace_text)
+                                else:
+                                    # Case Insensitive Literal Replace
+                                    lower_orig = original_text.lower()
+                                    lower_find = find_text.lower()
+                                    if lower_find in lower_orig:
+                                        total_occurrences += lower_orig.count(lower_find)
+                                        if mode == "replace":
+                                            # Using regex for case-insensitive literal replacement to preserve case of non-matches
+                                            esc_pattern = re.compile(re.escape(find_text), re.IGNORECASE)
+                                            new_text = esc_pattern.sub(replace_text, original_text)
+
+                            if new_text != original_text and mode == "replace":
+                                tgt_node.text = new_text
+                                tgt_node.set('state', 'translated')
+                                file_modified = True
+
+                    if file_modified and mode == "replace":
+                        files_modified_count += 1
+                        if make_backup:
+                            shutil.copy2(file_path, str(file_path) + ".bak")
+                        tree.write(str(file_path), encoding="UTF-8", xml_declaration=True, pretty_print=True)
+
+                except Exception as e:
+                    print(f"Error in {file_path}: {e}")
+                
+                # Update Progress (Thread Safe call not strictly needed for Var but good practice)
+                progress['value'] = idx + 1
+                dialog.update_idletasks()
+
+            # 3. Report
+            action_verb = "Replaced" if mode == "replace" else "Found"
+            msg = f"{action_verb} {total_occurrences} occurrences in {len(files_to_process)} files."
+            if mode == "replace":
+                msg += f"\nModified {files_modified_count} files."
+            
+            messagebox.showinfo("Result", msg)
+            
+            # Reload if current file was touched
+            if mode == "replace" and self.current_file and any(str(p) == str(self.current_file) for p in files_to_process):
+                self.load_file(self.current_file)
+
+        # Thread Wrappers
+        def start_replace():
+            threading.Thread(target=lambda: run_replace_logic("replace")).start()
+
+        def start_count():
+            threading.Thread(target=lambda: run_replace_logic("count")).start()
+
+        ttk.Button(btn_frame, text="Replace All", command=start_replace, bootstyle="danger").pack(side=RIGHT, padx=5)
+        ttk.Button(btn_frame, text="Count Matches (Dry Run)", command=start_count, bootstyle="info-outline").pack(side=RIGHT, padx=5)
