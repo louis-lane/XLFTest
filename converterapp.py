@@ -10,14 +10,59 @@ from datetime import datetime
 import os
 import zlib
 import base64
+import json
+import sys
 
-# --- List of protected language names for UI elements ---
-PROTECTED_LANGUAGE_NAMES = {
-    "english", "español", "français", "italiano", "deutsch", "português", "العربية", "čeština", "lietuvių", "polskie",
-    "svenska", "nederlands-vlaamse", "türk", "tiếng việt", "bahasa melayu", "dansk", "eesti", "slovenčina", "norsk", "suomi",
-    "bahasa indonesia", "简体中文 (中国)", "繁體中文 (香港)", "ไทย", "greek", "한국어", "සිංහල", "नेपाली", "తెలుగు", "বাংলা",
-    "ગુજરાતી", "हिन्दी", "ಕನ್ನಡ", "മലയാളം", "मराठी", "ଓଡ଼ିଆ", "தமிழ்", "اردو", "اللغة العربية", "ελληνικά", "हिंदी"
+# --- DEFAULT CONFIGURATION (Fallback if config.json is missing) ---
+DEFAULT_CONFIG = {
+    "folder_names": {
+        "excel_export": "1_Excel_for_Translation",
+        "xliff_output": "2_Translated_XLIFFs",
+        "master_repo": "master_localization_files"
+    },
+    "protected_languages": [
+        "english", "español", "français", "italiano", "deutsch", "português", "العربية", "čeština", "lietuvių", "polskie",
+        "svenska", "nederlands-vlaamse", "türk", "tiếng việt", "bahasa melayu", "dansk", "eesti", "slovenčina", "norsk", "suomi",
+        "bahasa indonesia", "简体中文 (中国)", "繁體中文 (香港)", "ไทย", "greek", "한국어", "සිංහල", "नेपाली", "తెలుగు", "বাংলা",
+        "ગુજરાતી", "हिन्दी", "ಕನ್ನಡ", "മലയാളം", "मराठी", "ଓଡ଼ିଆ", "தமிழ்", "اردو", "اللغة العربية", "ελληνικά", "हिंदी"
+    ]
 }
+
+# --- CONFIG LOADER ---
+def load_config():
+    """Loads config.json if present; otherwise returns defaults."""
+    # Determine path to config file (works for both .py and .exe)
+    if getattr(sys, 'frozen', False):
+        application_path = Path(sys.executable).parent
+    else:
+        application_path = Path(__file__).parent
+
+    config_path = application_path / "config.json"
+    
+    current_config = DEFAULT_CONFIG.copy()
+
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                user_config = json.load(f)
+                
+                # Merge Protected Languages (normalize to lowercase set)
+                if "protected_languages" in user_config:
+                    current_config["protected_languages"] = user_config["protected_languages"]
+                
+                # Merge Folder Names
+                if "folder_names" in user_config:
+                    current_config["folder_names"].update(user_config["folder_names"])
+                    
+        except Exception as e:
+            print(f"Warning: Could not load config.json. Using defaults. Error: {e}")
+
+    # Convert list to set for faster lookup and normalization
+    current_config["protected_set"] = {x.lower() for x in current_config["protected_languages"]}
+    return current_config
+
+# Initialize Config Globally
+CONFIG = load_config()
 
 # --- Helper to get EXACT target language from XLIFF ---
 def get_target_language(xliff_path):
@@ -28,16 +73,13 @@ def get_target_language(xliff_path):
     except Exception:
         return 'unknown'
 
-# --- NEW: Helper Functions for ID Compression ---
+# --- Helper Functions for ID Compression ---
 def compress_ids(id_list):
     """Compresses a list of IDs into a safe Base64 string for Excel."""
     if not id_list: return ""
     try:
-        # Join IDs with a pipe delimiter
         full_string = "|".join(str(x) for x in id_list)
-        # Compress and encode
         compressed_data = zlib.compress(full_string.encode('utf-8'))
-        # Return as a string safe for Excel cells
         return base64.b64encode(compressed_data).decode('utf-8')
     except Exception:
         return ""
@@ -47,7 +89,6 @@ def decompress_ids(blob_string):
     if not blob_string or pd.isna(blob_string) or str(blob_string).strip() == "":
         return []
     try:
-        # Decode Base64 and Decompress
         compressed_data = base64.b64decode(str(blob_string))
         full_string = zlib.decompress(compressed_data).decode('utf-8')
         return full_string.split('|')
@@ -57,9 +98,11 @@ def decompress_ids(blob_string):
 # --- DeepL Translation Feature ---
 def apply_deepl_translations(root_path):
     """Reads DeepL output files and applies them to the master Excel files."""
-    master_folder = root_path / "1_Excel_for_Translation"
+    master_folder_name = CONFIG["folder_names"]["excel_export"]
+    master_folder = root_path / master_folder_name
+    
     if not master_folder.exists():
-        raise ValueError("The '1_Excel_for_Translation' folder was not found.")
+        raise ValueError(f"The '{master_folder_name}' folder was not found.")
 
     deepl_folder_path = filedialog.askdirectory(title="Select the Folder Containing DeepL Translated Files")
     if not deepl_folder_path:
@@ -70,7 +113,7 @@ def apply_deepl_translations(root_path):
     deepl_files = list(deepl_folder.glob("*.xlsx"))
 
     if not master_files:
-        raise ValueError("No master Excel files found in '1_Excel_for_Translation'.")
+        raise ValueError(f"No master Excel files found in '{master_folder_name}'.")
     if not deepl_files:
         raise ValueError(f"No .xlsx files found in the selected DeepL folder.")
 
@@ -122,9 +165,16 @@ def apply_deepl_translations(root_path):
 # --- Helper Function for Standard File Processing ---
 def process_standard_files(root_path, translated_dir):
     """Replaces standard localization files with master versions, updating the course ID."""
-    repo_path = Path("master_localization_files")
+    repo_name = CONFIG["folder_names"]["master_repo"]
+    repo_path = Path(repo_name)
+    
     if not repo_path.exists():
-        return 
+        # Try looking for repo relative to executable if not found in CWD
+        if getattr(sys, 'frozen', False):
+            repo_path = Path(sys.executable).parent / repo_name
+        
+        if not repo_path.exists():
+            return 
 
     prefixes = ["localization-localization_", "localizationerrors-localizationerrors_"]
     
@@ -200,7 +250,7 @@ def perform_analysis(root_path, glossary_path=None):
         analysis_results[lang_code] = {'Total Words': lang_df['word_count'].sum(), 'Repetitions': reps_words, 'Glossary Matches': glossary_words, 'New Words': new_words}
     return analysis_results
 
-# --- Core Logic (MODIFIED for ID Compression) ---
+# --- Core Logic ---
 def export_to_excel_with_glossary(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No .xliff files were found.")
@@ -213,8 +263,10 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
             if lang not in glossary_map: glossary_map[lang] = {}
             glossary_map[lang][row['source_text'].strip()] = row['target_text']
             
-    output_dir = root_path / "1_Excel_for_Translation"
+    output_dir_name = CONFIG["folder_names"]["excel_export"]
+    output_dir = root_path / output_dir_name
     output_dir.mkdir(exist_ok=True)
+    
     all_records, errors = [], []
     
     for file in xliff_files:
@@ -248,7 +300,6 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
                     existing_target=('existing_target', lambda x: next((s for s in x if s), '')),
                     count=('id', 'size'),
                     locations=('original_source_file', lambda x: ', '.join(x.unique())),
-                    # Compress list of IDs into a safe string blob
                     id_blob=('id', lambda x: compress_ids(list(x)))
                 ).reset_index()
 
@@ -260,7 +311,8 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
                 for index, row in deduplicated.iterrows():
                     source_lower = row['source'].lower()
 
-                    if source_lower in PROTECTED_LANGUAGE_NAMES:
+                    # --- USE CONFIG FOR PROTECTED LANGUAGES ---
+                    if source_lower in CONFIG["protected_set"]:
                         deduplicated.at[index, 'target'] = row['source'] 
                         deduplicated.at[index, 'status'] = 'Protected (Language Name)'
                         continue 
@@ -304,8 +356,10 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
     return len(xliff_files), processed_langs, len(errors)
 
 def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
-    input_dir = root_path / "1_Excel_for_Translation"
-    if not input_dir.exists(): raise ValueError("'1_Excel_for_Translation' folder not found.")
+    input_dir_name = CONFIG["folder_names"]["excel_export"]
+    input_dir = root_path / input_dir_name
+    
+    if not input_dir.exists(): raise ValueError(f"'{input_dir_name}' folder not found.")
     master_files = list(input_dir.glob('*-master.xlsx'))
     if not master_files: raise ValueError("No '*-master.xlsx' files found.")
     
@@ -363,7 +417,8 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
             errors.append(f"Could not build translation map from {master_file.name}: {e}")
 
     # 3. Reconstruct XLIFFs
-    translated_dir = root_path / "2_Translated_XLIFFs"
+    xliff_output_name = CONFIG["folder_names"]["xliff_output"]
+    translated_dir = root_path / xliff_output_name
     separate_lang_dir = translated_dir / "Separate Languages"
     translated_dir.mkdir(exist_ok=True); separate_lang_dir.mkdir(exist_ok=True)
     processed_count = 0
@@ -502,7 +557,7 @@ class FinalConverterApp(tk.Tk):
         self.auto_load_glossary()
 
     def run_apply_deepl(self):
-        root_dir = filedialog.askdirectory(title="Select the Project Root Folder (containing '1_Excel_for_Translation')")
+        root_dir = filedialog.askdirectory(title=f"Select the Project Root Folder (containing '{CONFIG['folder_names']['excel_export']}')")
         if not root_dir: return
         try:
             updated_count, total_count, errors = apply_deepl_translations(Path(root_dir))
@@ -594,10 +649,13 @@ class FinalConverterApp(tk.Tk):
         if not root_dir: return
         try:
             file_count, lang_count, error_count = export_to_excel_with_glossary(Path(root_dir), self.glossary_path)
+            
+            output_folder = CONFIG["folder_names"]["excel_export"]
+            
             if error_count > 0:
                 messagebox.showwarning("Completed with Errors", f"Processed {file_count} XLIFFs for {lang_count} language(s), but {error_count} errors occurred. See error_log.txt for details.")
             else:
-                messagebox.showinfo("Success", f"Processed {file_count} XLIFFs for {lang_count} language(s).\n\nFind masters in '1_Excel_for_Translation'.")
+                messagebox.showinfo("Success", f"Processed {file_count} XLIFFs for {lang_count} language(s).\n\nFind masters in '{output_folder}'.")
         except Exception as e:
             messagebox.showerror("Error", f"A critical error stopped the process: {e}")
 
@@ -606,10 +664,13 @@ class FinalConverterApp(tk.Tk):
         if not root_dir: return
         try:
             processed_count, error_count = import_and_reconstruct_with_glossary(Path(root_dir), self.glossary_path)
+            
+            output_folder = CONFIG["folder_names"]["xliff_output"]
+            
             if error_count > 0:
                 messagebox.showwarning("Completed with Errors", f"Reconstructed {processed_count} files, but {error_count} errors occurred. See error_log.txt for details.")
             else:
-                messagebox.showinfo("Success", f"Reconstructed {processed_count} files.\n\nFind final files in '2_Translated_XLIFFs'.")
+                messagebox.showinfo("Success", f"Reconstructed {processed_count} files.\n\nFind final files in '{output_folder}'.")
         except Exception as e:
             messagebox.showerror("Error", f"A critical error stopped the process: {e}")
 
