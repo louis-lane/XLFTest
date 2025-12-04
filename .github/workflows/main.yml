@@ -24,7 +24,7 @@ jobs:
     
     - name: Build executable
       run: |
-        pyinstaller --onefile --windowed --name "TranslationTool" ConverterApp.py
+        pyinstaller --onefile --windowed --name "TranslationTool" windows_build/ConverterApp.py
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
