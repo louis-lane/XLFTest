@@ -18,7 +18,6 @@ class EditorTab(ttk.Frame):
         # --- MAIN LAYOUT: 3 PANES (Sidebar | Grid | Editor) ---
         
         # 1. Main Horizontal Split: [Sidebar] | [Content Area]
-        # We use tk_ttk.PanedWindow here to avoid the AttributeError
         self.main_split = tk_ttk.PanedWindow(self, orient=HORIZONTAL)
         self.main_split.pack(fill=BOTH, expand=True, padx=5, pady=5)
 
@@ -42,16 +41,32 @@ class EditorTab(ttk.Frame):
         self.file_tree.pack(side=LEFT, fill=BOTH, expand=True)
         self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
 
-        # 3. RIGHT CONTENT AREA (Holds Grid + Editor)
+        # 3. RIGHT CONTENT AREA (Holds Search Bar + Grid + Editor)
         self.content_area = ttk.Frame(self.main_split)
         self.main_split.add(self.content_area, weight=4)
+
+        # --- TOP CONTROLS (SEARCH & FILTER) ---
+        top_controls = ttk.Frame(self.content_area, padding=(0, 0, 0, 5))
+        top_controls.pack(fill=X)
+
+        ttk.Label(top_controls, text="Search:").pack(side=LEFT, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(top_controls, textvariable=self.search_var, width=30)
+        self.search_entry.pack(side=LEFT, padx=(0, 10))
+        self.search_entry.bind("<KeyRelease>", self.apply_filter)
+
+        ttk.Label(top_controls, text="Filter Status:").pack(side=LEFT, padx=(10, 5))
+        self.filter_var = tk.StringVar(value="All")
+        self.filter_combo = ttk.Combobox(top_controls, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=15)
+        self.filter_combo.pack(side=LEFT)
+        self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
         # --- EDITOR SPLIT: [Grid] / [Edit Panel] ---
         # Vertical split inside the right content area
         self.editor_split = tk_ttk.PanedWindow(self.content_area, orient=VERTICAL)
         self.editor_split.pack(fill=BOTH, expand=True)
         
-        # Top: Grid
+        # Grid Pane
         self.grid_frame = ttk.Frame(self.editor_split)
         self.editor_split.add(self.grid_frame, weight=2)
         
@@ -76,7 +91,7 @@ class EditorTab(ttk.Frame):
         
         self.tree.bind("<<TreeviewSelect>>", self.on_row_select)
 
-        # Bottom: Edit Panel
+        # Edit Panel Pane
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=1)
         
@@ -89,9 +104,15 @@ class EditorTab(ttk.Frame):
         self.txt_target = tk.Text(self.edit_panel, height=3, bg="white", fg="black", insertbackground="black")
         self.txt_target.pack(fill=X, pady=(0, 5))
         
-        # Controls
+        # Controls (Status Dropdown + Save Button)
         controls_bot = ttk.Frame(self.edit_panel)
-        controls_bot.pack(fill=X)
+        controls_bot.pack(fill=X, pady=5)
+
+        ttk.Label(controls_bot, text="Status:").pack(side=LEFT, padx=(0, 5))
+        self.edit_status_var = tk.StringVar()
+        self.status_dropdown = ttk.Combobox(controls_bot, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
+        self.status_dropdown.pack(side=LEFT)
+
         ttk.Button(controls_bot, text="Save Segment", command=self.save_segment, bootstyle="success").pack(side=RIGHT)
 
         # Internal Data State
@@ -143,9 +164,6 @@ class EditorTab(ttk.Frame):
             self.xml_tree = etree.parse(path)
             self.data_store = []
             
-            # Clear Grid
-            for i in self.tree.get_children(): self.tree.delete(i)
-            
             # Parse XML
             for tu in self.xml_tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
                 uid = tu.get('id')
@@ -157,23 +175,45 @@ class EditorTab(ttk.Frame):
                 status = tgt_node.get('state', 'new') if tgt_node is not None else 'new'
                 
                 self.data_store.append({'id': uid, 'source': src, 'target': tgt, 'status': status, 'node': tu})
-                
-                # Add to Grid (Flatten newlines for display)
-                display_src = src.replace('\n', ' ')
-                display_tgt = tgt.replace('\n', ' ')
-                
-                # Color Coding
-                tag = status.lower().replace(" ", "_")
-                self.tree.insert("", "end", values=(uid, status, display_src, display_tgt), tags=(tag,))
-
-            # Colors
-            self.tree.tag_configure('new', foreground='#ff4d4d') 
-            self.tree.tag_configure('needs_review', foreground='#ffad33')
-            self.tree.tag_configure('translated', foreground='#33cc33')
-            self.tree.tag_configure('final', foreground='#3399ff')
+            
+            # Populate Grid based on filters
+            self.apply_filter()
 
         except Exception as e:
             messagebox.showerror("Error", f"Could not load file: {e}")
+
+    def apply_filter(self, event=None):
+        # Clear current Grid
+        for i in self.tree.get_children(): self.tree.delete(i)
+        
+        filter_status = self.filter_var.get().lower()
+        search_term = self.search_var.get().lower()
+        
+        for rec in self.data_store:
+            # 1. Status Filter
+            s_status = str(rec['status']).lower()
+            if filter_status != "all" and s_status.replace(" ", "") != filter_status.replace(" ", ""):
+                continue
+            
+            # 2. Search Filter
+            s_src = str(rec['source']).lower()
+            s_tgt = str(rec['target']).lower()
+            s_id = str(rec['id']).lower()
+            if search_term and (search_term not in s_src and search_term not in s_tgt and search_term not in s_id):
+                continue
+                
+            # Add to Grid (Flatten newlines for display)
+            display_src = rec['source'].replace('\n', ' ')
+            display_tgt = rec['target'].replace('\n', ' ')
+            
+            tag = s_status.replace(" ", "_")
+            self.tree.insert("", "end", values=(rec['id'], rec['status'], display_src, display_tgt), tags=(tag,))
+
+        # Colors
+        self.tree.tag_configure('new', foreground='#ff4d4d') 
+        self.tree.tag_configure('needs_review', foreground='#ffad33')
+        self.tree.tag_configure('translated', foreground='#33cc33')
+        self.tree.tag_configure('final', foreground='#3399ff')
 
     def on_row_select(self, event):
         sel = self.tree.selection()
@@ -183,6 +223,8 @@ class EditorTab(ttk.Frame):
         rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
         if rec:
             self.current_edit_id = uid
+            
+            # Update Text Boxes
             self.txt_source.config(state=NORMAL)
             self.txt_source.delete("1.0", END)
             self.txt_source.insert("1.0", rec['source'])
@@ -190,17 +232,21 @@ class EditorTab(ttk.Frame):
             
             self.txt_target.delete("1.0", END)
             self.txt_target.insert("1.0", rec['target'])
+            
+            # Update Dropdown
+            self.edit_status_var.set(rec['status'])
 
     def save_segment(self):
         if not self.current_edit_id: return
         new_txt = self.txt_target.get("1.0", "end-1c")
+        new_status = self.edit_status_var.get()
         
         # Update Memory
         rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
         if not rec: return
         
         rec['target'] = new_txt
-        rec['status'] = 'translated' # Auto-update status on save
+        rec['status'] = new_status
         
         # Update XML Node
         tgt_node = rec['node'].find('xliff:target', namespaces=self.namespaces)
@@ -208,13 +254,21 @@ class EditorTab(ttk.Frame):
             tgt_node = etree.SubElement(rec['node'], f"{{{self.namespaces['xliff']}}}target")
         
         tgt_node.text = new_txt
-        tgt_node.set('state', 'translated')
+        tgt_node.set('state', new_status)
         
         # Save to Disk
         try:
             self.xml_tree.write(self.current_file, encoding="UTF-8", xml_declaration=True, pretty_print=True)
-            # Refresh View (Keep simple for now)
-            self.load_file(self.current_file)
+            
+            # Refresh Grid (keeps filters applied)
+            self.apply_filter()
+            
+            # Re-select row to keep focus
+            for child in self.tree.get_children():
+                if str(self.tree.item(child, 'values')[0]) == str(self.current_edit_id):
+                    self.tree.selection_set(child)
+                    self.tree.see(child)
+                    break
+                    
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save: {e}")
-
