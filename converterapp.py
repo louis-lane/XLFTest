@@ -1,6 +1,7 @@
-# ConverterApp.py
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 import pandas as pd
 from lxml import etree
 from pathlib import Path
@@ -12,8 +13,9 @@ import zlib
 import base64
 import json
 import sys
+import threading
 
-# --- DEFAULT CONFIGURATION (Fallback if config.json is missing) ---
+# --- DEFAULT CONFIGURATION (Fallback) ---
 DEFAULT_CONFIG = {
     "folder_names": {
         "excel_export": "1_Excel_for_Translation",
@@ -21,50 +23,43 @@ DEFAULT_CONFIG = {
         "master_repo": "master_localization_files"
     },
     "protected_languages": [
-        "english", "español", "français", "italiano", "deutsch", "português", "العربية", "čeština", "lietuvių", "polskie",
-        "svenska", "nederlands-vlaamse", "türk", "tiếng việt", "bahasa melayu", "dansk", "eesti", "slovenčina", "norsk", "suomi",
-        "bahasa indonesia", "简体中文 (中国)", "繁體中文 (香港)", "ไทย", "greek", "한국어", "සිංහල", "नेपाली", "తెలుగు", "বাংলা",
-        "ગુજરાતી", "हिन्दी", "ಕನ್ನಡ", "മലയാളം", "मराठी", "ଓଡ଼ିଆ", "தமிழ்", "اردو", "اللغة العربية", "ελληνικά", "हिंदी"
+        "English", "Español", "Français", "Italiano", "Deutsch", "Português", 
+        "Svenska", "Nederlands-Vlaamse", "Dansk", "Norsk", "Suomi", 
+        "Polskie", "Čeština", "Lietuvių", "Eesti", "Slovenčina", 
+        "Bahasa Indonesia", "Bahasa Melayu", "Tiếng Việt", "Thai", 
+        "Chinese (Simplified)", "Chinese (Traditional)", "Japanese", "Korean"
     ]
 }
 
 # --- CONFIG LOADER ---
 def load_config():
     """Loads config.json if present; otherwise returns defaults."""
-    # Determine path to config file (works for both .py and .exe)
     if getattr(sys, 'frozen', False):
         application_path = Path(sys.executable).parent
     else:
         application_path = Path(__file__).parent
 
     config_path = application_path / "config.json"
-    
     current_config = DEFAULT_CONFIG.copy()
 
     if config_path.exists():
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 user_config = json.load(f)
-                
-                # Merge Protected Languages (normalize to lowercase set)
                 if "protected_languages" in user_config:
                     current_config["protected_languages"] = user_config["protected_languages"]
-                
-                # Merge Folder Names
                 if "folder_names" in user_config:
                     current_config["folder_names"].update(user_config["folder_names"])
-                    
         except Exception as e:
             print(f"Warning: Could not load config.json. Using defaults. Error: {e}")
 
-    # Convert list to set for faster lookup and normalization
     current_config["protected_set"] = {x.lower() for x in current_config["protected_languages"]}
     return current_config
 
-# Initialize Config Globally
 CONFIG = load_config()
 
-# --- Helper to get EXACT target language from XLIFF ---
+# --- HELPER FUNCTIONS ---
+
 def get_target_language(xliff_path):
     try:
         tree = etree.parse(xliff_path)
@@ -73,9 +68,7 @@ def get_target_language(xliff_path):
     except Exception:
         return 'unknown'
 
-# --- Helper Functions for ID Compression ---
 def compress_ids(id_list):
-    """Compresses a list of IDs into a safe Base64 string for Excel."""
     if not id_list: return ""
     try:
         full_string = "|".join(str(x) for x in id_list)
@@ -85,7 +78,6 @@ def compress_ids(id_list):
         return ""
 
 def decompress_ids(blob_string):
-    """Decompresses the Base64 string from Excel back into a list of IDs."""
     if not blob_string or pd.isna(blob_string) or str(blob_string).strip() == "":
         return []
     try:
@@ -95,9 +87,63 @@ def decompress_ids(blob_string):
     except Exception:
         return []
 
-# --- DeepL Translation Feature ---
+def log_errors_to_file(root_path, errors):
+    log_path = Path(root_path) / "error_log.txt"
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(f"\n--- Log Entry: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+        for error in errors:
+            f.write(f"- {error}\n")
+
+def update_glossary_file(glossary_path, new_entries):
+    glossary_df = pd.read_excel(glossary_path) if Path(glossary_path).exists() else pd.DataFrame(columns=['source_text', 'target_text', 'language_code'])
+    new_entries_df = pd.DataFrame(new_entries)
+    combined_df = pd.concat([glossary_df, new_entries_df], ignore_index=True)
+    combined_df.drop_duplicates(subset=['source_text', 'language_code'], keep='first', inplace=True)
+    combined_df.to_excel(glossary_path, index=False)
+
+def xliff_to_dataframe(xliff_path):
+    ns = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+    tree = etree.parse(xliff_path)
+    records = []
+    non_translatable_strings = {'left-alignc', 'imagestatic-1', 'video2-1', 'imagehotspot-1'}
+    non_translatable_patterns = [re.compile(r'text-\d+', re.IGNORECASE)]
+    
+    for trans_unit in tree.xpath('//xliff:trans-unit', namespaces=ns):
+        if trans_unit.get('translate') == 'no': continue
+        source_element = trans_unit.find('xliff:source', namespaces=ns)
+        source_text = (source_element.text or '').strip()
+        target_element = trans_unit.find('xliff:target', namespaces=ns)
+        target_text = (target_element.text or '').strip() if target_element is not None else ''
+
+        if not source_text: continue
+        lower_source = source_text.lower()
+        if lower_source.endswith(('.jpg', '.png')) or lower_source in non_translatable_strings or any(p.fullmatch(lower_source) for p in non_translatable_patterns):
+            continue
+        records.append({
+            'id': trans_unit.get('id'),
+            'source': source_text,
+            'existing_target': target_text,
+            'gomo-id (context)': trans_unit.get('gomo-id', '')
+        })
+    return pd.DataFrame(records)
+
+def update_xliff_from_map(original_path, lang_specific_map):
+    tree = etree.parse(original_path)
+    ns = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+    etree.register_namespace('xliff', ns['xliff'])
+    for trans_unit in tree.xpath('//xliff:trans-unit', namespaces=ns):
+        unit_id = trans_unit.get('id')
+        if unit_id and unit_id in lang_specific_map:
+            target_element = trans_unit.find('xliff:target', namespaces=ns)
+            if target_element is None:
+                target_element = etree.SubElement(trans_unit, f"{{{ns['xliff']}}}target")
+            target_element.text = lang_specific_map[unit_id]
+            target_element.set('state', 'translated')
+    return tree
+
+# --- CORE LOGIC FUNCTIONS ---
+
 def apply_deepl_translations(root_path):
-    """Reads DeepL output files and applies them to the master Excel files."""
     master_folder_name = CONFIG["folder_names"]["excel_export"]
     master_folder = root_path / master_folder_name
     
@@ -123,7 +169,6 @@ def apply_deepl_translations(root_path):
     for master_file in master_files:
         base_lang_code = master_file.name.replace("-master.xlsx", "")
         matching_deepl_file = None
-
         for df in deepl_files:
             if df.name.lower().startswith(base_lang_code.lower()):
                 matching_deepl_file = df
@@ -136,48 +181,34 @@ def apply_deepl_translations(root_path):
         try:
             deepl_df = pd.read_excel(matching_deepl_file, header=None, skiprows=1)
             translations = deepl_df.iloc[:, 0].astype(str).fillna('')
-
             master_wb = pd.ExcelFile(master_file)
             sheet_name = f"{base_lang_code}-Translate_Here"
-            
             if sheet_name not in master_wb.sheet_names:
                 errors.append(f"Sheet '{sheet_name}' not found in {master_file.name}")
                 continue
-                
             master_df = pd.read_excel(master_wb, sheet_name=sheet_name)
-            
             if len(translations) != len(master_df):
                  errors.append(f"Row count mismatch for {master_file.name}. Master has {len(master_df)} rows, DeepL file has {len(translations)} rows.")
                  continue
-
             master_df['target'] = translations
-            
             with pd.ExcelWriter(master_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
                 master_df.to_excel(writer, sheet_name=sheet_name, index=False)
-            
             updated_count += 1
-
         except Exception as e:
             errors.append(f"Failed to process {master_file.name} with {matching_deepl_file.name}: {e}")
 
     return updated_count, len(master_files), errors
 
-# --- Helper Function for Standard File Processing ---
 def process_standard_files(root_path, translated_dir):
-    """Replaces standard localization files with master versions, updating the course ID."""
     repo_name = CONFIG["folder_names"]["master_repo"]
     repo_path = Path(repo_name)
-    
     if not repo_path.exists():
-        # Try looking for repo relative to executable if not found in CWD
         if getattr(sys, 'frozen', False):
             repo_path = Path(sys.executable).parent / repo_name
-        
         if not repo_path.exists():
             return 
 
     prefixes = ["localization-localization_", "localizationerrors-localizationerrors_"]
-    
     course_id = None
     all_translated_files = list(translated_dir.glob('*.xliff'))
     content_files = [f for f in all_translated_files if not f.name.startswith(('localization-', 'localizationerrors-'))]
@@ -190,32 +221,25 @@ def process_standard_files(root_path, translated_dir):
                 course_id = file_node.get('id')
         except Exception as e:
             raise ValueError(f"Could not determine course ID from content files: {e}")
-    
-    if not course_id:
-        return
+    if not course_id: return
 
     for prefix in prefixes:
         for standard_file in translated_dir.glob(f"{prefix}*.xliff"):
             lang_code = standard_file.name.replace(prefix, "").replace(".xliff", "")
             master_file_path = repo_path / standard_file.name
-            
             if master_file_path.exists():
                 try:
                     master_tree = etree.parse(str(master_file_path))
                     file_node = master_tree.find('.//xliff:file', namespaces={'xliff': 'urn:oasis:names:tc:xliff:document:1.2'})
                     if file_node is not None:
                         file_node.set('id', course_id)
-                    
                     master_tree.write(str(standard_file), pretty_print=True, xml_declaration=True, encoding='UTF-8')
-
                     sorted_lang_path = translated_dir / "Separate Languages" / lang_code / standard_file.name
                     if sorted_lang_path.exists():
                         master_tree.write(str(sorted_lang_path), pretty_print=True, xml_declaration=True, encoding='UTF-8')
-
                 except Exception as e:
                     log_errors_to_file(root_path, [f"Failed to replace master file {standard_file.name}: {e}"])
 
-# --- Analysis Function ---
 def perform_analysis(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No .xliff files were found.")
@@ -250,11 +274,9 @@ def perform_analysis(root_path, glossary_path=None):
         analysis_results[lang_code] = {'Total Words': lang_df['word_count'].sum(), 'Repetitions': reps_words, 'Glossary Matches': glossary_words, 'New Words': new_words}
     return analysis_results
 
-# --- Core Logic ---
 def export_to_excel_with_glossary(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No .xliff files were found.")
-    
     glossary_map = {}
     if glossary_path and Path(glossary_path).exists():
         glossary_df = pd.read_excel(glossary_path)
@@ -266,7 +288,6 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
     output_dir_name = CONFIG["folder_names"]["excel_export"]
     output_dir = root_path / output_dir_name
     output_dir.mkdir(exist_ok=True)
-    
     all_records, errors = [], []
     
     for file in xliff_files:
@@ -288,14 +309,11 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
     master_df['source'] = master_df['source'].str.strip()
     processed_langs = 0
     
-    # GROUP BY LANGUAGE CODE
     for lang_code, lang_df in master_df.groupby('language'):
         try:
             master_workbook_path = output_dir / f"{lang_code}-master.xlsx"
             with pd.ExcelWriter(master_workbook_path, engine='openpyxl') as writer:
                 translate_sheet_name = f"{lang_code}-Translate_Here"
-                
-                # --- AGGREGATION WITH ID COMPRESSION ---
                 deduplicated = lang_df.groupby('source').agg(
                     existing_target=('existing_target', lambda x: next((s for s in x if s), '')),
                     count=('id', 'size'),
@@ -306,39 +324,29 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
                 deduplicated['target'] = deduplicated['existing_target']
                 deduplicated['status'] = ''
                 deduplicated['add_to_glossary'] = ''
-                
                 lang_glossary = glossary_map.get(lang_code, {})
                 for index, row in deduplicated.iterrows():
                     source_lower = row['source'].lower()
-
-                    # --- USE CONFIG FOR PROTECTED LANGUAGES ---
                     if source_lower in CONFIG["protected_set"]:
                         deduplicated.at[index, 'target'] = row['source'] 
                         deduplicated.at[index, 'status'] = 'Protected (Language Name)'
                         continue 
-
                     if not row['target'] and row['source'] in lang_glossary:
                         deduplicated.at[index, 'target'] = lang_glossary[row['source']]
                         deduplicated.at[index, 'status'] = 'Pre-translated from Glossary'
                     elif row['target']:
                         deduplicated.at[index, 'status'] = 'Existing translation'
                 
-                # Include id_blob in the columns to write
                 deduplicated = deduplicated[['source', 'target', 'count', 'locations', 'status', 'add_to_glossary', 'id_blob']]
                 deduplicated.to_excel(writer, sheet_name=translate_sheet_name, index=False)
-                
                 workbook, worksheet = writer.book, writer.sheets[translate_sheet_name]
-                
-                # Hide the ID Blob column (Column G / 7th column)
                 worksheet.column_dimensions['G'].hidden = True
-                
                 grey_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
                 for row_idx, status in enumerate(deduplicated['status'], start=2):
                     if status in ('Pre-translated from Glossary', 'Protected (Language Name)'):
                         for col_idx in range(1, len(deduplicated.columns) + 1):
                             worksheet.cell(row=row_idx, column=col_idx).fill = grey_fill
                 
-                # Write context sheets (hidden)
                 for filename, file_df in lang_df.groupby('original_source_file'):
                     sheet_name = Path(filename).stem[:31]
                     if 'existing_target' in file_df.columns:
@@ -346,7 +354,6 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
                     else:
                          file_df.to_excel(writer, sheet_name=sheet_name, index=False)
                     workbook[sheet_name].sheet_state = 'hidden'
-                
                 workbook.active = worksheet
             processed_langs += 1
         except Exception as e:
@@ -358,14 +365,11 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
 def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
     input_dir_name = CONFIG["folder_names"]["excel_export"]
     input_dir = root_path / input_dir_name
-    
     if not input_dir.exists(): raise ValueError(f"'{input_dir_name}' folder not found.")
     master_files = list(input_dir.glob('*-master.xlsx'))
     if not master_files: raise ValueError("No '*-master.xlsx' files found.")
     
     errors = []
-    
-    # 1. Update Glossary
     try:
         new_glossary_entries = []
         for master_file in master_files:
@@ -384,39 +388,26 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
     except Exception as e:
         errors.append(f"A critical error occurred while updating the glossary: {e}")
 
-    # 2. Build Translation Map (Keyed by Language + ID)
     translation_map = {}
-    
     for master_file in master_files:
         try:
             lang_code = master_file.name.replace("-master.xlsx", "")
             if lang_code not in translation_map: translation_map[lang_code] = {}
-            
             sheet_name = f"{lang_code}-Translate_Here"
             df = pd.read_excel(master_file, sheet_name=sheet_name)
-            
-            # --- MAP CONSTRUCTION USING DECOMPRESSED IDs ---
             if 'target' not in df.columns or 'id_blob' not in df.columns:
                 errors.append(f"Missing required columns (target or id_blob) in {master_file.name}.")
                 continue
-
             df.dropna(subset=['target', 'id_blob'], inplace=True)
-            
             for _, row in df.iterrows():
                 target_text = str(row['target'])
                 blob = str(row['id_blob'])
-                
-                # Decompress the blob back to a list of IDs
                 ids = decompress_ids(blob)
-                
-                # Map EVERY ID in the list to this single translation
                 for unit_id in ids:
                     translation_map[lang_code][unit_id] = target_text
-
         except Exception as e:
             errors.append(f"Could not build translation map from {master_file.name}: {e}")
 
-    # 3. Reconstruct XLIFFs
     xliff_output_name = CONFIG["folder_names"]["xliff_output"]
     translated_dir = root_path / xliff_output_name
     separate_lang_dir = translated_dir / "Separate Languages"
@@ -427,23 +418,15 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
     for xliff_file in original_files:
         try:
             lang_code_xml = get_target_language(xliff_file)
-            
-            # Lookup in map
             lang_specific_map = translation_map.get(lang_code_xml, {})
-            
-            # Fallback check
             if not lang_specific_map:
                 for key in translation_map:
                     if key.lower() == lang_code_xml.lower():
                         lang_specific_map = translation_map[key]
                         break
-
-            # Reconstruct using ID matching
             modified_tree = update_xliff_from_map(xliff_file, lang_specific_map)
-            
             primary_path = translated_dir / xliff_file.name
             modified_tree.write(primary_path, pretty_print=True, xml_declaration=True, encoding='UTF-8')
-            
             lang_dir = separate_lang_dir / lang_code_xml
             lang_dir.mkdir(exist_ok=True)
             secondary_path = lang_dir / xliff_file.name
@@ -451,7 +434,6 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
             processed_count += 1
         except Exception as e:
             errors.append(f"Could not reconstruct file {xliff_file.name}: {e}")
-            
     try:
         process_standard_files(root_path, translated_dir)
     except Exception as e:
@@ -460,153 +442,185 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
     if errors: log_errors_to_file(root_path, errors)
     return processed_count, len(errors)
 
-# --- Helper Functions (Logging, Glossary, XML parsing) ---
-def log_errors_to_file(root_path, errors):
-    log_path = Path(root_path) / "error_log.txt"
-    with log_path.open("a", encoding="utf-8") as f:
-        f.write(f"\n--- Log Entry: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-        for error in errors:
-            f.write(f"- {error}\n")
+# --- MODERN GUI CLASS ---
 
-def update_glossary_file(glossary_path, new_entries):
-    glossary_df = pd.read_excel(glossary_path) if Path(glossary_path).exists() else pd.DataFrame(columns=['source_text', 'target_text', 'language_code'])
-    new_entries_df = pd.DataFrame(new_entries)
-    combined_df = pd.concat([glossary_df, new_entries_df], ignore_index=True)
-    combined_df.drop_duplicates(subset=['source_text', 'language_code'], keep='first', inplace=True)
-    combined_df.to_excel(glossary_path, index=False)
-
-def xliff_to_dataframe(xliff_path):
-    ns = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
-    tree = etree.parse(xliff_path)
-    records = []
-    non_translatable_strings = {'left-alignc', 'imagestatic-1', 'video2-1', 'imagehotspot-1'}
-    non_translatable_patterns = [re.compile(r'text-\d+', re.IGNORECASE)]
-    
-    for trans_unit in tree.xpath('//xliff:trans-unit', namespaces=ns):
-        if trans_unit.get('translate') == 'no': continue
-
-        source_element = trans_unit.find('xliff:source', namespaces=ns)
-        source_text = (source_element.text or '').strip()
-        
-        target_element = trans_unit.find('xliff:target', namespaces=ns)
-        target_text = (target_element.text or '').strip() if target_element is not None else ''
-
-        if not source_text: continue
-        lower_source = source_text.lower()
-        if lower_source.endswith(('.jpg', '.png')) or lower_source in non_translatable_strings or any(p.fullmatch(lower_source) for p in non_translatable_patterns):
-            continue
-            
-        records.append({
-            'id': trans_unit.get('id'),
-            'source': source_text,
-            'existing_target': target_text,
-            'gomo-id (context)': trans_unit.get('gomo-id', '')
-        })
-        
-    return pd.DataFrame(records)
-
-def update_xliff_from_map(original_path, lang_specific_map):
-    tree = etree.parse(original_path)
-    ns = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
-    etree.register_namespace('xliff', ns['xliff'])
-    for trans_unit in tree.xpath('//xliff:trans-unit', namespaces=ns):
-        # --- MODIFIED: ID-Based Matching ---
-        unit_id = trans_unit.get('id')
-        
-        # Check if ID exists in our map
-        if unit_id and unit_id in lang_specific_map:
-            target_element = trans_unit.find('xliff:target', namespaces=ns)
-            
-            if target_element is None:
-                target_element = etree.SubElement(trans_unit, f"{{{ns['xliff']}}}target")
-            
-            target_element.text = lang_specific_map[unit_id]
-            target_element.set('state', 'translated')
-    return tree
-
-# --- GUI Application Class ---
-class FinalConverterApp(tk.Tk):
+class FinalConverterApp(ttk.Window):
     def __init__(self):
-        super().__init__()
+        super().__init__(themename="superhero")
         self.title("Translation Project Tool")
-        self.geometry("550x450") 
+        self.geometry("600x600")
         self.glossary_path = None
         
-        analysis_frame = tk.LabelFrame(self, text="Project Analysis", padx=10, pady=5)
-        analysis_frame.pack(padx=10, pady=5, fill="x")
-        tk.Button(analysis_frame, text="Analyze Files...", command=self.run_analysis).pack(pady=5)
+        # --- HEADER ---
+        header_frame = ttk.Frame(self, padding=10)
+        header_frame.pack(fill=X)
+        ttk.Label(header_frame, text="Localization Toolkit", font=("Helvetica", 16, "bold")).pack(side=LEFT)
+        ttk.Button(header_frame, text="⚙ Edit Config", command=self.open_config, bootstyle="outline-secondary").pack(side=RIGHT)
+
+        # --- MAIN CONTENT AREA ---
+        main_frame = ttk.Frame(self, padding=15)
+        main_frame.pack(fill=BOTH, expand=True)
+
+        # 1. ANALYSIS SECTION
+        lc = ttk.Labelframe(main_frame, text="1. Analysis & Setup", padding=10, bootstyle="info")
+        lc.pack(fill=X, pady=5)
         
-        glossary_frame = tk.LabelFrame(self, text="Glossary", padx=10, pady=5)
-        glossary_frame.pack(padx=10, pady=5, fill="x")
-        self.glossary_status_label = tk.Label(glossary_frame, text="No glossary loaded.", fg="orange")
-        self.glossary_status_label.pack(side="left", padx=5)
-        tk.Button(glossary_frame, text="Load Glossary...", command=self.load_glossary).pack(side="right")
+        col1 = ttk.Frame(lc)
+        col1.pack(fill=X)
         
-        frame1 = tk.LabelFrame(self, text="Step 1: Create Excel Workbooks", padx=10, pady=10)
-        frame1.pack(padx=10, pady=10, fill="x")
-        tk.Button(frame1, text="Select Root Folder and Create Masters", command=self.run_export).pack(pady=5)
+        self.glossary_label = ttk.Label(col1, text="No glossary loaded", foreground="orange")
+        self.glossary_label.pack(side=LEFT, padx=5)
+        ttk.Button(col1, text="Load Glossary", command=self.load_glossary, bootstyle="secondary-sm").pack(side=RIGHT)
         
-        frame1_5 = tk.LabelFrame(self, text="Step 1.5: Apply Machine Translations", padx=10, pady=10)
-        frame1_5.pack(padx=10, pady=10, fill="x")
-        tk.Button(frame1_5, text="Select Root Folder and Apply DeepL Files...", command=self.run_apply_deepl).pack(pady=5)
+        ttk.Separator(lc, orient=HORIZONTAL).pack(fill=X, pady=10)
+        ttk.Button(lc, text="Analyze Project Statistics", command=lambda: self.start_thread(self.run_analysis), bootstyle="info").pack(fill=X)
+
+        # 2. EXPORT SECTION
+        l1 = ttk.Labelframe(main_frame, text="2. Export for Translation", padding=10, bootstyle="primary")
+        l1.pack(fill=X, pady=10)
         
-        frame2 = tk.LabelFrame(self, text="Step 2: Create Translated XLIFFs", padx=10, pady=10)
-        frame2.pack(padx=10, pady=10, fill="x")
-        tk.Button(frame2, text="Select Root Folder and Reconstruct XLIFFs", command=self.run_import).pack(pady=5)
+        b1 = ttk.Button(l1, text="Create Excel Masters (Step 1)", command=lambda: self.start_thread(self.run_export), bootstyle="primary")
+        b1.pack(fill=X, pady=2)
         
+        b2 = ttk.Button(l1, text="Apply DeepL Translations (Step 1.5)", command=lambda: self.start_thread(self.run_apply_deepl), bootstyle="primary-outline")
+        b2.pack(fill=X, pady=2)
+
+        # 3. IMPORT SECTION
+        l2 = ttk.Labelframe(main_frame, text="3. Import & Reconstruct", padding=10, bootstyle="success")
+        l2.pack(fill=X, pady=5)
+        
+        ttk.Button(l2, text="Reconstruct XLIFFs (Step 2)", command=lambda: self.start_thread(self.run_import), bootstyle="success").pack(fill=X)
+
+        # --- STATUS BAR & PROGRESS ---
+        self.status_frame = ttk.Frame(self, padding=10)
+        self.status_frame.pack(side=BOTTOM, fill=X)
+        
+        self.progress = ttk.Progressbar(self.status_frame, mode='indeterminate', bootstyle="success-striped")
+        self.status_label = ttk.Label(self.status_frame, text="Ready", font=("Helvetica", 9))
+        self.status_label.pack(side=LEFT)
+
         self.auto_load_glossary()
 
-    def run_apply_deepl(self):
-        root_dir = filedialog.askdirectory(title=f"Select the Project Root Folder (containing '{CONFIG['folder_names']['excel_export']}')")
-        if not root_dir: return
-        try:
-            updated_count, total_count, errors = apply_deepl_translations(Path(root_dir))
-            
-            if errors:
-                error_message = "\n- ".join(errors)
-                log_errors_to_file(Path(root_dir), errors)
-                messagebox.showwarning("Completed with Errors", f"Updated {updated_count} of {total_count} master files.\n\nErrors occurred:\n- {error_message}\n\nSee error_log.txt for details.")
-            elif updated_count == 0 and total_count > 0:
-                 messagebox.showwarning("No Files Updated", "The process ran, but no matching files were found or updated.")
-            else:
-                messagebox.showinfo("Success", f"Successfully updated {updated_count} of {total_count} master files with DeepL translations.")
+    # --- THREADING HELPER ---
+    def start_thread(self, target_func):
+        """Runs a function in a separate thread so the GUI doesn't freeze."""
+        # Check if function requires user input on main thread first (usually file dialogs)
+        # Note: We handle file dialogs inside the specific run_ methods before calling this logic if needed.
+        # But here, we wrap the method call.
+        self.progress.pack(side=RIGHT, fill=X, expand=True, padx=10)
+        self.progress.start(10)
+        self.status_label.config(text="Processing... Please wait.")
+        
+        thread = threading.Thread(target=self.run_wrapper, args=(target_func,))
+        thread.start()
 
-        except Exception as e:
-            messagebox.showerror("Error", f"A critical error stopped the process: {e}")
+    def run_wrapper(self, func):
+        try:
+            func() 
+        finally:
+            self.after(0, self.stop_progress)
+
+    def stop_progress(self):
+        self.progress.stop()
+        self.progress.pack_forget()
+        self.status_label.config(text="Ready")
+
+    # --- LOGIC HANDLERS ---
+    
+    def open_config(self):
+        config_path = Path("config.json")
+        if config_path.exists():
+            os.startfile(config_path) # Windows only
+        else:
+            messagebox.showwarning("Missing", "config.json not found.")
+
+    def run_apply_deepl(self):
+        # DIALOG MUST BE ON MAIN THREAD
+        root_dir = filedialog.askdirectory(title=f"Select Root Folder")
+        if not root_dir: return
+
+        # DEFER HEAVY LOGIC
+        def worker():
+            try:
+                updated, total, errors = apply_deepl_translations(Path(root_dir))
+                msg = f"Updated {updated}/{total} files."
+                if errors: 
+                    log_errors_to_file(Path(root_dir), errors)
+                    msg += " Check logs."
+                messagebox.showinfo("Result", msg)
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        
+        self.start_thread(worker)
+
+    def run_export(self):
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
+        if not root_dir: return
+
+        def worker():
+            try:
+                fc, lc, ec = export_to_excel_with_glossary(Path(root_dir), self.glossary_path)
+                messagebox.showinfo("Result", f"Processed {fc} files ({lc} langs). Errors: {ec}")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        
+        self.start_thread(worker)
+
+    def run_import(self):
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
+        if not root_dir: return
+
+        def worker():
+            try:
+                pc, ec = import_and_reconstruct_with_glossary(Path(root_dir), self.glossary_path)
+                messagebox.showinfo("Result", f"Reconstructed {pc} files. Errors: {ec}")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        
+        self.start_thread(worker)
 
     def run_analysis(self):
-        root_dir = filedialog.askdirectory(title="Select Root Folder to Analyze")
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
         if not root_dir: return
-        try:
-            report_data = perform_analysis(Path(root_dir), self.glossary_path)
-            self.display_analysis_report(report_data)
-        except Exception as e:
-            messagebox.showerror("Analysis Error", f"Could not complete analysis: {e}")
+        
+        def worker():
+            try:
+                data = perform_analysis(Path(root_dir), self.glossary_path)
+                self.after(0, lambda: self.display_analysis_report(data))
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        
+        self.start_thread(worker)
 
     def display_analysis_report(self, data):
-        report_window = tk.Toplevel(self)
+        report_window = ttk.Toplevel(self)
         report_window.title("Translation Analysis Report")
-        report_window.geometry("650x400")
-        top_frame = tk.Frame(report_window)
-        top_frame.pack(pady=5)
-        export_button = tk.Button(top_frame, text="Export to TXT", command=lambda: self.export_report_to_text(data))
-        export_button.pack()
+        report_window.geometry("800x500")
+        
+        top_frame = ttk.Frame(report_window, padding=10)
+        top_frame.pack(fill=X)
+        ttk.Button(top_frame, text="Export to TXT", command=lambda: self.export_report_to_text(data)).pack()
+        
         cols = ['Language', 'Total Words', 'Repetitions', 'Glossary Matches', 'New Words']
-        tree = ttk.Treeview(report_window, columns=cols, show="headings")
+        tree = ttk.Treeview(report_window, columns=cols, show="headings", bootstyle="info")
+        
         for col in cols:
             tree.heading(col, text=col)
             tree.column(col, width=120, anchor='center')
+        
         totals = {key: 0 for key in ['Total Words', 'Repetitions', 'Glossary Matches', 'New Words']}
         for lang, metrics in data.items():
             row = (lang, metrics['Total Words'], metrics['Repetitions'], metrics['Glossary Matches'], metrics['New Words'])
             tree.insert("", "end", values=row)
             for key in totals:
                 totals[key] += metrics.get(key, 0)
+        
         tree.insert("", "end", values=())
         total_row = ('TOTAL', totals['Total Words'], totals['Repetitions'], totals['Glossary Matches'], totals['New Words'])
         tree.insert("", "end", values=total_row, tags=('totalrow',))
-        tree.tag_configure('totalrow', font='TkDefaultFont 9 bold')
-        tree.pack(expand=True, fill="both")
+        tree.tag_configure('totalrow', font=('Helvetica', 10, 'bold'))
+        
+        tree.pack(expand=True, fill="both", padx=10, pady=10)
 
     def export_report_to_text(self, data):
         filepath = filedialog.asksaveasfilename(title="Save Report As", defaultextension=".txt", filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
@@ -614,7 +628,7 @@ class FinalConverterApp(tk.Tk):
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 headers = ['Language', 'Total Words', 'Repetitions', 'Glossary Matches', 'New Words']
-                widths = [15, 15, 15, 18, 15]
+                widths = [20, 15, 15, 18, 15]
                 header_line = "".join(h.ljust(w) for h, w in zip(headers, widths))
                 f.write(f"{header_line}\n")
                 f.write(f"{'-' * sum(widths)}\n")
@@ -642,37 +656,7 @@ class FinalConverterApp(tk.Tk):
     def set_glossary(self, path):
         self.glossary_path = path
         filename = Path(path).name
-        self.glossary_status_label.config(text=f"Using: {filename}", fg="green")
-
-    def run_export(self):
-        root_dir = filedialog.askdirectory(title="Select Root Folder with original XLIFF files")
-        if not root_dir: return
-        try:
-            file_count, lang_count, error_count = export_to_excel_with_glossary(Path(root_dir), self.glossary_path)
-            
-            output_folder = CONFIG["folder_names"]["excel_export"]
-            
-            if error_count > 0:
-                messagebox.showwarning("Completed with Errors", f"Processed {file_count} XLIFFs for {lang_count} language(s), but {error_count} errors occurred. See error_log.txt for details.")
-            else:
-                messagebox.showinfo("Success", f"Processed {file_count} XLIFFs for {lang_count} language(s).\n\nFind masters in '{output_folder}'.")
-        except Exception as e:
-            messagebox.showerror("Error", f"A critical error stopped the process: {e}")
-
-    def run_import(self):
-        root_dir = filedialog.askdirectory(title="Select the SAME Root Folder")
-        if not root_dir: return
-        try:
-            processed_count, error_count = import_and_reconstruct_with_glossary(Path(root_dir), self.glossary_path)
-            
-            output_folder = CONFIG["folder_names"]["xliff_output"]
-            
-            if error_count > 0:
-                messagebox.showwarning("Completed with Errors", f"Reconstructed {processed_count} files, but {error_count} errors occurred. See error_log.txt for details.")
-            else:
-                messagebox.showinfo("Success", f"Reconstructed {processed_count} files.\n\nFind final files in '{output_folder}'.")
-        except Exception as e:
-            messagebox.showerror("Error", f"A critical error stopped the process: {e}")
+        self.glossary_label.config(text=f"Using: {filename}", foreground="green")
 
 if __name__ == "__main__":
     app = FinalConverterApp()
