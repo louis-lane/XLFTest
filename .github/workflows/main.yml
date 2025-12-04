@@ -1,33 +1,42 @@
-name: Build Windows Executable
+name: Build EXE
 
+# Trigger the build manually via the "Actions" tab or on push to main
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: windows-latest
-    
+
     steps:
+    # 1. Check out your code
     - uses: actions/checkout@v4
-    
+
+    # 2. Install Python
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
-    
+        python-version: '3.11' # 3.11 is stable for PyInstaller
+
+    # 3. Install dependencies from requirements.txt
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas lxml openpyxl pyinstaller
-    
-    - name: Build executable
+        pip install -r requirements.txt
+
+    # 4. Build the EXE using PyInstaller
+    # --onefile: Bundles everything into a single .exe
+    # --noconsole: Prevents the black command window from popping up (since you have a GUI)
+    # --name: Sets the output name
+    - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name "TranslationTool" windows_build/ConverterApp.py
-    
-    - name: Upload artifact
+        pyinstaller --onefile --noconsole --name "ConverterApp" ConverterApp.py
+
+    # 5. Upload the resulting EXE so you can download it
+    - name: Upload EXE Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: TranslationTool-Windows
-        path: dist/TranslationTool.exe
+        name: ConverterApp-EXE
+        path: dist/ConverterApp.exe
