@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
+# Import standard ttk as 'tk_ttk' to access PanedWindow
+from tkinter import ttk as tk_ttk 
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 import pandas as pd
@@ -528,7 +530,8 @@ class XliffEditorTab(ttk.Frame):
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
         # --- PANED WINDOW (Split View) ---
-        self.paned_window = ttk.PanedWindow(self, orient=VERTICAL)
+        # FIX: Use standard tk_ttk.PanedWindow because ttkbootstrap sometimes misses it
+        self.paned_window = tk_ttk.PanedWindow(self, orient=VERTICAL)
         self.paned_window.pack(fill=BOTH, expand=True)
 
         # 1. TOP PANE: TREEVIEW
