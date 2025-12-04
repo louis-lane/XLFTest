@@ -15,13 +15,70 @@ DEFAULT_CONFIG = {
         "xliff_output": "2_Translated_XLIFFs",
         "master_repo": "master_localization_files"
     },
-    "protected_languages": ["English", "Spanish", "French", "German"] # (Truncated for brevity, logic remains)
+    "protected_languages": [
+        "English", "British English", "American English",
+        "Español", "Spanish",
+        "Français", "French",
+        "Italiano", "Italian",
+        "Deutsch", "German",
+        "Português", "Portuguese", "Português (Brasil)",
+        "Svenska", "Swedish",
+        "Nederlands-Vlaamse", "Nederlands", "Dutch", "Vlaams",
+        "Dansk", "Danish",
+        "Norsk", "Norwegian",
+        "Suomi", "Finnish",
+        "Íslenska", "Icelandic",
+        "Gaeilge", "Irish",
+        "Cymraeg", "Welsh",
+        "Polskie", "Polski", "Polish",
+        "Čeština", "Czech",
+        "Lietuvių", "Lithuanian",
+        "Eesti", "Estonian",
+        "Slovenčina", "Slovak",
+        "Slovenščina", "Slovenian",
+        "Magyar", "Hungarian",
+        "Română", "Romanian",
+        "Latviešu", "Latvian",
+        "Hrvatski", "Croatian",
+        "Srpski", "Serbian",
+        "Bosanski", "Bosnian",
+        "Русский", "Russian",
+        "Українська", "Ukrainian",
+        "Български", "Bulgarian",
+        "Ελληνικά", "Greek",
+        "Türk", "Türkçe", "Turkish",
+        "Bahasa Indonesia", "Indonesian",
+        "Bahasa Melayu", "Malay",
+        "Tiếng Việt", "Vietnamese",
+        "Tagalog", "Filipino",
+        "ไทย", "Thai",
+        "简体中文 (中国)", "简体中文", "Chinese (Simplified)",
+        "繁體中文 (香港)", "繁體中文", "Chinese (Traditional)", "中國傳統 (香港)",
+        "日本語", "Japanese",
+        "한국어", "Korean",
+        "العربية", "Arabic",
+        "עברית", "Hebrew",
+        "فارسی", "Persian",
+        "اردو", "Urdu",
+        "සිංහල", "Sinhala",
+        "नेपाली", "Nepali",
+        "বাংলা", "Bengali",
+        "ગુજરાતી", "Gujarati",
+        "हिंदी", "Hindi", "हिन्दी",
+        "ಕನ್ನಡ", "Kannada",
+        "മലയാളം", "Malayalam",
+        "मराठी", "Marathi",
+        "ଓଡ଼ିଆ", "Odia",
+        "தமிழ்", "Tamil",
+        "తెలుగు", "Telugu"
+    ]
 }
 
 def load_config():
     if getattr(sys, 'frozen', False):
         app_path = Path(sys.executable).parent
     else:
+        # Assumes this file is in utils/, so app root is one level up
         app_path = Path(__file__).parent.parent
     
     config_path = app_path / "config.json"
@@ -70,12 +127,12 @@ def decompress_ids(blob):
     except: return []
 
 def xliff_to_dataframe(xliff_path):
-    # Shared parsing logic used by Analysis and Excel Export
     ns = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
     tree = etree.parse(xliff_path)
     records = []
     non_translatable = {'left-alignc', 'imagestatic-1', 'video2-1'}
-    
+    non_translatable_patterns = [re.compile(r'text-\d+', re.IGNORECASE)]
+
     for tu in tree.xpath('//xliff:trans-unit', namespaces=ns):
         if tu.get('translate') == 'no': continue
         src_node = tu.find('xliff:source', namespaces=ns)
@@ -84,7 +141,11 @@ def xliff_to_dataframe(xliff_path):
         tgt_txt = (tgt_node.text or '').strip() if tgt_node is not None else ''
 
         if not src_txt: continue
-        if src_txt.lower() in non_translatable: continue
+        
+        # Check against patterns
+        lower_source = src_txt.lower()
+        if lower_source.endswith(('.jpg', '.png')) or lower_source in non_translatable or any(p.fullmatch(lower_source) for p in non_translatable_patterns):
+            continue
         
         records.append({
             'id': tu.get('id'),
@@ -93,3 +154,16 @@ def xliff_to_dataframe(xliff_path):
             'gomo-id (context)': tu.get('gomo-id', '')
         })
     return pd.DataFrame(records)
+
+# --- THIS WAS MISSING ---
+def update_glossary_file(glossary_path, new_entries):
+    """Updates the glossary Excel file with new entries."""
+    if Path(glossary_path).exists():
+        glossary_df = pd.read_excel(glossary_path)
+    else:
+        glossary_df = pd.DataFrame(columns=['source_text', 'target_text', 'language_code'])
+        
+    new_entries_df = pd.DataFrame(new_entries)
+    combined_df = pd.concat([glossary_df, new_entries_df], ignore_index=True)
+    combined_df.drop_duplicates(subset=['source_text', 'language_code'], keep='first', inplace=True)
+    combined_df.to_excel(glossary_path, index=False)
