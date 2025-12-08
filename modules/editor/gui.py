@@ -24,14 +24,18 @@ class EditorTab(ttk.Frame):
         self.current_folder = None
         self.current_file = None
         self.file_map = {} 
-        self.glossary_data = [] 
+        self.xml_tree = None 
+        self.data_store = []
+        self.current_edit_id = None
         
         self.sidebar_visible = True
         self.glossary_visible = True
         self.admin_mode_active = False 
         
+        # --- UI SETUP ---
         self.setup_ui()
         self.setup_hotkeys()
+        
         self.logic.load_glossary()
 
     def setup_ui(self):
@@ -43,13 +47,13 @@ class EditorTab(ttk.Frame):
         self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
         ToolTip(self.btn_toggle_sidebar, "Toggle File Sidebar")
         
-        # --- NEW TAG DROPDOWN ---
-        # This menu will be populated dynamically when a row is selected
-        self.mb_tags = ttk.Menubutton(self.toolbar, text="</>", bootstyle="secondary-outline")
-        self.mb_tags.pack(side=LEFT, padx=(0, 10))
-        self.menu_tags = tk.Menu(self.mb_tags, tearoff=0)
-        self.mb_tags['menu'] = self.menu_tags
-        ToolTip(self.mb_tags, "Insert Tags from Source")
+        # --- TAG SYNTAX SELECTOR (New) ---
+        ttk.Label(self.toolbar, text="Tag Syntax:").pack(side=LEFT, padx=(0, 5))
+        self.tag_syntax_var = tk.StringVar(value="Standard XML <>")
+        self.combo_syntax = ttk.Combobox(self.toolbar, textvariable=self.tag_syntax_var, values=("Standard XML <>", "Gomo []"), state="readonly", width=15)
+        self.combo_syntax.pack(side=LEFT, padx=(0, 15))
+        self.combo_syntax.bind("<<ComboboxSelected>>", self.on_syntax_change)
+        ToolTip(self.combo_syntax, "Select authoring tool format for tags")
 
         # Global Actions
         btn_copy = ttk.Button(self.toolbar, text="➜ Source", command=self.copy_source_to_target, bootstyle="link")
@@ -93,6 +97,7 @@ class EditorTab(ttk.Frame):
         # Center Content
         self.content_area = ttk.Frame(self.main_split)
         self.main_split.add(self.content_area, weight=4)
+        
         self.editor_split = tk_ttk.PanedWindow(self.content_area, orient=VERTICAL)
         self.editor_split.pack(fill=BOTH, expand=True)
         
@@ -101,10 +106,11 @@ class EditorTab(ttk.Frame):
         self.editor_split.add(self.grid_frame, weight=3)
         cols = ("id", "source", "target", "status")
         self.tree = ttk.Treeview(self.grid_frame, columns=cols, show="headings", selectmode="extended")
-        self.tree.heading("id", text="ID"); self.tree.column("id", width=50)
+        self.tree.heading("id", text="ID"); self.tree.column("id", width=50, stretch=False)
         self.tree.heading("source", text="Original Source"); self.tree.column("source", width=300)
         self.tree.heading("target", text="Translation Target"); self.tree.column("target", width=300)
-        self.tree.heading("status", text="St"); self.tree.column("status", width=40, anchor="center")
+        self.tree.heading("status", text="St"); self.tree.column("status", width=40, anchor="center", stretch=False)
+        
         self.tree.tag_configure('new', foreground='#ff4d4d')
         self.tree.tag_configure('needs_review', foreground='#ffad33')
         self.tree.tag_configure('translated', foreground='#33cc33')
@@ -123,7 +129,9 @@ class EditorTab(ttk.Frame):
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=2)
         
+        # Header Controls
         h = ttk.Frame(self.edit_panel); h.pack(side=TOP, fill=X, pady=(0, 10))
+        
         ttk.Label(h, text="Status:").pack(side=LEFT)
         self.edit_status_var = tk.StringVar()
         self.status_dropdown = ttk.Combobox(h, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=12)
@@ -133,7 +141,16 @@ class EditorTab(ttk.Frame):
         ttk.Button(h, text="B", width=2, command=lambda: self.format_text("b"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
         ttk.Button(h, text="I", width=2, command=lambda: self.format_text("i"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
         ttk.Button(h, text="U", width=2, command=lambda: self.format_text("u"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
+        
+        # --- MOVED TAG BUTTON HERE ---
+        self.mb_tags = ttk.Menubutton(h, text="</>", bootstyle="secondary-outline")
+        self.mb_tags.pack(side=LEFT, padx=(5, 1))
+        self.menu_tags = tk.Menu(self.mb_tags, tearoff=0)
+        self.mb_tags['menu'] = self.menu_tags
+        ToolTip(self.mb_tags, "Insert Tags found in Source")
+
         ttk.Separator(h, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=5)
+        
         ttk.Button(h, text="↶", width=2, command=lambda: self.txt_target.edit_undo(), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
         ttk.Button(h, text="↷", width=2, command=lambda: self.txt_target.edit_redo(), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
 
@@ -152,8 +169,6 @@ class EditorTab(ttk.Frame):
         self.txt_target = tk.Text(self.edit_panel, height=4, undo=True, maxundo=50, wrap="word")
         self.txt_target.pack(fill=BOTH, expand=True)
         self.txt_target.bind("<Button-3>", self.show_target_menu)
-        
-        # --- BIND CLICK FOR SMART TAG SELECTION ---
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
 
         # Right Sidebar (Glossary)
@@ -170,119 +185,105 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
-    # --- TAG & FORMATTING LOGIC ---
-    
+    # --- TAG LOGIC (Dynamic) ---
+    def on_syntax_change(self, event):
+        # Refresh tag menu for current row if one is selected
+        if self.current_edit_id:
+            rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+            if rec: self.update_tag_menu(rec['source'])
+
     def update_tag_menu(self, source_text):
-        """Populates the </> dropdown in the ribbon based on source tags."""
         self.menu_tags.delete(0, END)
-        tags = self.logic.extract_tags(source_text)
+        syntax = self.tag_syntax_var.get()
+        tags = self.logic.extract_tags(source_text, syntax) # Pass Syntax Mode
         
         if not tags:
             self.menu_tags.add_command(label="(No tags found)", state=DISABLED)
             return
 
         for tag in tags:
-            # We use format_text to insert/toggle this specific tag
-            # For complex tags like <g id="1"> we treat them as single objects for now
             self.menu_tags.add_command(label=tag, command=lambda t=tag: self.insert_raw_tag(t))
 
     def insert_raw_tag(self, tag_text):
-        """Inserts a specific tag string at cursor."""
         self.txt_target.insert(tk.INSERT, tag_text)
         self.txt_target.focus_set()
 
     def format_text(self, tag_type):
         """
-        Smart Toggle:
-        - If text selected: Wrap in <tag>...</tag>. 
-        - If ALREADY wrapped: Remove tags.
+        Smart Toggle that adapts to Tag Syntax.
         """
-        open_tag = f"<{tag_type}>"
-        close_tag = f"</{tag_type}>"
+        mode = self.tag_syntax_var.get()
+        if mode == "Gomo []":
+            open_tag, close_tag = f"[{tag_type}]", f"[/{tag_type}]"
+        else: # Standard
+            open_tag, close_tag = f"<{tag_type}>", f"</{tag_type}>"
         
         try:
             if not self.txt_target.tag_ranges("sel"):
-                # No selection: Insert empty pair and move cursor inside
                 self.txt_target.insert(tk.INSERT, f"{open_tag}{close_tag}")
                 self.txt_target.mark_set(tk.INSERT, f"insert - {len(close_tag)}c")
             else:
-                sel_first = self.txt_target.index("sel.first")
-                sel_last = self.txt_target.index("sel.last")
+                sel_first = self.txt_target.index("sel.first"); sel_last = self.txt_target.index("sel.last")
                 text = self.txt_target.get(sel_first, sel_last)
                 
-                # CHECK IF ALREADY WRAPPED (The "Toggle" Logic)
-                # We check if the selected text starts/ends with the tags
-                # OR if the characters immediately outside the selection are the tags
-                
-                # Check inside selection
+                # Check ALREADY WRAPPED
                 if text.startswith(open_tag) and text.endswith(close_tag):
-                    # Remove tags
                     inner = text[len(open_tag):-len(close_tag)]
                     self.txt_target.delete(sel_first, sel_last)
                     self.txt_target.insert(sel_first, inner)
-                    # Re-select the inner text
                     self.txt_target.tag_add("sel", sel_first, f"{sel_first} + {len(inner)}c")
                     return
 
-                # Wrap
                 self.txt_target.delete(sel_first, sel_last)
                 self.txt_target.insert(sel_first, f"{open_tag}{text}{close_tag}")
-                
-        except tk.TclError: pass
+        except: pass
         self.txt_target.focus_set()
 
     def on_target_click(self, event):
         """
-        Smart Select: If user clicks on a tag (<b>), try to find its partner (</b>)
-        and select the whole block.
+        Smart Select looking for tags based on selected Syntax Mode.
         """
         try:
             index = self.txt_target.index(f"@{event.x},{event.y}")
-            # Get a small window of text around the click to detect tags
-            # We look 5 chars back and 5 forward roughly
             line_start = f"{index.split('.')[0]}.0"
             line_text = self.txt_target.get(line_start, f"{line_start} lineend")
             char_offset = int(index.split('.')[1])
             
-            # Simple heuristic: Look for <tag> pattern near cursor
-            # This is complex to do perfectly without a parser, but we can try simple regex on the line
-            tags = re.finditer(r"</?[a-zA-Z0-9]+>", line_text)
+            # 1. Determine Regex based on Syntax
+            mode = self.tag_syntax_var.get()
+            if mode == "Gomo []":
+                # Look for [tag] or [/tag]
+                pattern = r"\[/?(?:b|i|u|color|size|url|img)[^\]]*\]"
+                open_char, close_char = '[', ']'
+            else:
+                # Look for <tag> or </tag>
+                pattern = r"</?[a-zA-Z0-9]+>"
+                open_char, close_char = '<', '>'
+
+            tags = re.finditer(pattern, line_text)
             
-            clicked_tag = None
-            tag_start = None
-            tag_end = None
-            
+            clicked_tag = None; tag_start = None; tag_end = None
             for match in tags:
                 s, e = match.span()
                 if s <= char_offset <= e:
-                    clicked_tag = match.group()
-                    tag_start = s
-                    tag_end = e
-                    break
+                    clicked_tag = match.group(); tag_start = s; tag_end = e; break
             
             if clicked_tag:
-                # We clicked a tag! Is it open or close?
-                is_closing = clicked_tag.startswith("</")
-                tag_name = re.sub(r"[</>]", "", clicked_tag)
+                is_closing = clicked_tag.startswith(f"{open_char}/")
+                tag_name = re.sub(r"[\[\]<>/]", "", clicked_tag) # Clean name
                 
-                start_sel = None
-                end_sel = None
+                start_sel = None; end_sel = None
                 
                 if not is_closing:
-                    # Find closing
-                    # Search forward from tag_end
                     rest_of_line = line_text[tag_end:]
-                    closer = f"</{tag_name}>"
+                    closer = f"{open_char}/{tag_name}{close_char}"
                     close_idx = rest_of_line.find(closer)
                     if close_idx != -1:
-                        # Found matching pair on same line
                         start_sel = f"{index.split('.')[0]}.{tag_start}"
                         end_sel = f"{index.split('.')[0]}.{tag_end + close_idx + len(closer)}"
                 else:
-                    # Find opening
-                    # Search backward from tag_start
                     prev_line = line_text[:tag_start]
-                    opener = f"<{tag_name}>"
+                    opener = f"{open_char}{tag_name}{close_char}"
                     open_idx = prev_line.rfind(opener)
                     if open_idx != -1:
                         start_sel = f"{index.split('.')[0]}.{open_idx}"
@@ -291,10 +292,9 @@ class EditorTab(ttk.Frame):
                 if start_sel and end_sel:
                     self.txt_target.tag_remove("sel", "1.0", END)
                     self.txt_target.tag_add("sel", start_sel, end_sel)
-                    
-        except Exception: pass # Fail silently if click logic errs
+        except: pass
 
-    # --- STANDARD METHODS (Load, Save, Nav) ---
+    # --- STANDARD METHODS ---
     def load_project_folder(self):
         folder = filedialog.askdirectory()
         if not folder: return
@@ -335,15 +335,12 @@ class EditorTab(ttk.Frame):
             self.txt_target.delete("1.0", END); self.txt_target.insert("1.0", rec['target'])
             self.edit_status_var.set(rec['status'])
             self.refresh_glossary_view(rec['source'])
-            
-            # UPDATE TAG MENU
             self.update_tag_menu(rec['source'])
 
     def refresh_glossary_view(self, source_text):
         for i in self.gloss_tree.get_children(): self.gloss_tree.delete(i)
         matches = self.logic.find_glossary_matches(source_text, self.current_file)
-        for term, trans in matches:
-            self.gloss_tree.insert("", "end", values=(term, trans))
+        for term, trans in matches: self.gloss_tree.insert("", "end", values=(term, trans))
 
     def save_segment(self):
         if not self.current_edit_id: return
@@ -412,7 +409,9 @@ class EditorTab(ttk.Frame):
             if status_filter != "all" and rec_status != filter_clean: continue
             if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
             tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
-            icon = status_map.get(str(rec['status']).lower(), '❓')
+            lookup = str(rec['status']).lower()
+            if lookup == 'needs_review': lookup = 'needs-review'
+            icon = status_map.get(lookup, '❓')
             self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
 
     def insert_glossary_term(self, event):
