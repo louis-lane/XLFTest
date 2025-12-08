@@ -28,10 +28,12 @@ class EditorTab(ttk.Frame):
         self.data_store = []
         self.current_edit_id = None
         
+        # State Flags
         self.sidebar_visible = True
         self.glossary_visible = True
         self.find_visible = False
-        self.admin_mode_active = False 
+        self.admin_mode_active = False
+        self.segment_dirty = False  # Track if text has been modified
         
         self.setup_ui()
         self.setup_hotkeys()
@@ -50,8 +52,8 @@ class EditorTab(ttk.Frame):
         self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
         ToolTip(self.btn_toggle_sidebar, "Toggle File Sidebar")
         
-        # Save Button (NEW)
-        self.btn_save_file = ttk.Button(self.toolbar, text="💾 Save", command=self.save_file, bootstyle="success")
+        # Save Button (Manual)
+        self.btn_save_file = ttk.Button(self.toolbar, text="💾 Save File", command=lambda: self.save_file(silent=False), bootstyle="success")
         self.btn_save_file.pack(side=LEFT, padx=(0, 10))
         ToolTip(self.btn_save_file, "Save changes to file")
 
@@ -162,6 +164,8 @@ class EditorTab(ttk.Frame):
         ttk.Label(f_right, text="[Ctrl+Enter to Save]", font=("Helvetica", 8), foreground="gray").pack(side=LEFT, padx=10)
         ttk.Button(f_right, text="<", width=3, command=lambda: self.navigate_grid(-1), bootstyle="secondary-outline").pack(side=LEFT)
         ttk.Button(f_right, text=">", width=3, command=lambda: self.navigate_grid(1), bootstyle="secondary-outline").pack(side=LEFT, padx=2)
+        
+        # Save Button: Commits segment AND writes to disk
         ttk.Button(f_right, text="Save & Next", command=self.save_and_next, bootstyle="success").pack(side=LEFT, padx=5)
 
         ttk.Label(self.edit_panel, text="Source:", bootstyle="inverse-secondary").pack(anchor=W)
@@ -174,6 +178,8 @@ class EditorTab(ttk.Frame):
         self.txt_target.pack(fill=BOTH, expand=True)
         self.txt_target.bind("<Button-3>", self.show_target_menu)
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
+        # Track unsaved changes
+        self.txt_target.bind("<KeyRelease>", self.on_text_modified)
 
         # 3. RIGHT SIDEBAR (CONTAINER)
         self.right_sidebar = ttk.Frame(self.main_split)
@@ -214,26 +220,19 @@ class EditorTab(ttk.Frame):
             except: pass
         else:
             # Show the panel if it's hidden but needs to be visible
-            # Uses 'panes()' to check existence safely without TclError
             if str(self.right_sidebar) not in self.main_split.panes():
                 self.main_split.add(self.right_sidebar, weight=1)
 
         # 2. Manage the Panes inside (Glossary vs Find)
-        # First, unpack everything
         self.glossary_frame.pack_forget()
         self.find_pane.pack_forget()
 
         if self.glossary_visible and self.find_visible:
-            # Both Visible: Glossary takes priority for expansion, Find at bottom
             self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
             self.find_pane.pack(side=BOTTOM, fill=X, padx=5, pady=5)
-        
         elif self.glossary_visible:
-            # Only Glossary: Takes full space
             self.glossary_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
-            
         elif self.find_visible:
-            # Only Find: Takes full space (fixes the resizing issue)
             self.find_pane.pack(fill=BOTH, expand=True, padx=5, pady=5)
     
     def toggle_glossary(self):
@@ -336,6 +335,25 @@ class EditorTab(ttk.Frame):
                 if start_sel and end_sel: self.txt_target.tag_remove("sel", "1.0", END); self.txt_target.tag_add("sel", start_sel, end_sel)
         except: pass
 
+    # --- UNSAVED CHANGES LOGIC ---
+    def on_text_modified(self, event):
+        # Ignore non-editing keys to prevent false positives
+        if event.keysym in ("Up", "Down", "Left", "Right", "Control_L", "Control_R", "Alt_L", "Alt_R", "Shift_L", "Shift_R"):
+            return
+        self.segment_dirty = True
+
+    def check_unsaved_changes(self):
+        """Returns True if it's safe to proceed, False if cancelled."""
+        if self.segment_dirty:
+            resp = messagebox.askyesnocancel("Unsaved Changes", "You have edited this segment but not saved.\nSave before continuing?")
+            if resp is None: # Cancel
+                return False
+            if resp: # Yes, save and proceed
+                self.save_segment()
+            else: # No, discard and proceed
+                self.segment_dirty = False
+        return True
+
     # --- DATA & IO METHODS ---
     def load_project_folder(self):
         folder = filedialog.askdirectory()
@@ -353,6 +371,10 @@ class EditorTab(ttk.Frame):
             for f in files: self.file_tree.insert(node, "end", text=f.name, values=(str(f),))
 
     def on_file_select(self, event):
+        # Check for unsaved changes before switching files
+        if not self.check_unsaved_changes():
+            return 
+
         sel = self.file_tree.selection()
         if not sel: return
         item = self.file_tree.item(sel[0])
@@ -364,19 +386,25 @@ class EditorTab(ttk.Frame):
         try:
             self.xml_tree, self.data_store = self.logic.load_xliff(path)
             self.apply_filter()
+            self.segment_dirty = False # Reset dirty flag on load
         except Exception as e: messagebox.showerror("Error", str(e))
     
-    def save_file(self):
+    def save_file(self, silent=False):
         if not self.current_file or not self.xml_tree:
-            messagebox.showwarning("Warning", "No file loaded.")
+            if not silent: messagebox.showwarning("Warning", "No file loaded.")
             return
         try:
             self.logic.save_xliff(self.xml_tree, self.current_file)
-            messagebox.showinfo("Success", f"File saved: {Path(self.current_file).name}")
+            if not silent:
+                messagebox.showinfo("Success", f"File saved: {Path(self.current_file).name}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save: {e}")
 
     def on_row_select(self, event):
+        # Check for unsaved changes before switching rows
+        if not self.check_unsaved_changes():
+            return
+
         sel = self.tree.selection()
         if not sel: return
         uid = self.tree.item(sel[0])['values'][0]
@@ -388,6 +416,7 @@ class EditorTab(ttk.Frame):
             self.edit_status_var.set(rec['status'])
             self.refresh_glossary_view(rec['source'])
             self.update_tag_menu(rec['source'])
+            self.segment_dirty = False # Reset dirty flag after loading new row
 
     def refresh_glossary_view(self, source_text):
         for i in self.gloss_tree.get_children(): self.gloss_tree.delete(i)
@@ -402,6 +431,7 @@ class EditorTab(ttk.Frame):
         try: self.txt_target.delete("sel.first", "sel.last")
         except: pass
         self.txt_target.insert(tk.INSERT, translation)
+        self.segment_dirty = True
 
     def save_segment(self):
         if not self.current_edit_id: return
@@ -426,7 +456,7 @@ class EditorTab(ttk.Frame):
                     self.tree.item(child, values=(rec['id'], rec['source'].replace('\n', ' '), new_target.replace('\n', ' '), icon), tags=(tag,))
                     break
             
-            # 4. Update XML Object (so it is ready for saving to disk)
+            # 4. Update XML Object
             if 'node' in rec:
                 tu = rec['node']
                 ns = self.logic.namespaces
@@ -435,6 +465,10 @@ class EditorTab(ttk.Frame):
                     tgt_node = etree.SubElement(tu, f"{{{ns['xliff']}}}target")
                 tgt_node.text = new_target
                 tgt_node.set('state', new_status)
+        
+        # 5. Write to Disk Immediately
+        self.save_file(silent=True)
+        self.segment_dirty = False
 
     def save_and_next(self):
         self.save_segment()
@@ -448,7 +482,8 @@ class EditorTab(ttk.Frame):
         self.tree.selection_set(items[new_idx]); self.tree.see(items[new_idx]); self.on_row_select(None)
 
     def setup_hotkeys(self):
-        self.txt_target.bind("<Control-Return>", lambda e: self.save_and_next())
+        # Added 'break' to prevent newline insertion on Ctrl+Enter
+        self.txt_target.bind("<Control-Return>", lambda e: self.save_and_next() or "break")
         self.txt_target.bind("<Control-b>", lambda e: self.format_text("b") or "break")
         self.txt_target.bind("<Control-i>", lambda e: self.format_text("i") or "break")
         self.txt_target.bind("<Control-u>", lambda e: self.format_text("u") or "break")
@@ -457,7 +492,6 @@ class EditorTab(ttk.Frame):
         
     def toggle_admin_mode(self, event=None):
         self.admin_mode_active = not self.admin_mode_active
-        # Add visual feedback or logic for admin mode here if needed
         print(f"Admin mode: {self.admin_mode_active}")
 
     def create_context_menus(self):
@@ -475,13 +509,13 @@ class EditorTab(ttk.Frame):
     def copy_source_to_target(self):
         if self.current_edit_id:
             rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
-            if rec: self.txt_target.delete("1.0", END); self.txt_target.insert("1.0", rec['source'])
-    def clear_target(self): self.txt_target.delete("1.0", END)
+            if rec: self.txt_target.delete("1.0", END); self.txt_target.insert("1.0", rec['source']); self.segment_dirty = True
+    def clear_target(self): self.txt_target.delete("1.0", END); self.segment_dirty = True
     def text_copy(self, w): 
         try: self.clipboard_clear(); self.clipboard_append(w.get("sel.first", "sel.last"))
         except: pass
     def text_paste(self, w):
-        try: w.insert(tk.INSERT, self.clipboard_get())
+        try: w.insert(tk.INSERT, self.clipboard_get()); self.segment_dirty = True
         except: pass
     
     def apply_filter(self, event=None):
