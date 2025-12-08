@@ -174,4 +174,87 @@ class FindReplacePane(ttk.Labelframe):
         self.res_tree.pack(fill=BOTH, expand=True, pady=2)
         self.res_tree.bind("<Double-1>", self.jump_to_result)
         
-        # FIXED: Removed 'height
+        self.prog = ttk.Progressbar(self, mode='determinate', bootstyle="warning-striped")
+        self.prog.pack(fill=X, pady=(2,0))
+
+    def run_thread(self, mode):
+        import threading
+        threading.Thread(target=lambda: self.run_process(mode)).start()
+
+    def run_process(self, mode):
+        find = self.e_find.get(); repl = self.e_repl.get()
+        if not find: return
+        
+        current_f = self.editor.current_file
+        file_map = self.editor.file_map
+        scope = self.var_scope.get()
+        
+        if not current_f and scope != "all_files": return
+
+        files = []
+        if scope == "current_file":
+            files = [Path(current_f)]
+        elif scope == "current_lang":
+            cur_lang = get_target_language(current_f)
+            if cur_lang in file_map:
+                files = file_map[cur_lang]
+        else: # All files
+            for l in file_map.values(): files.extend(l)
+        
+        pat = None
+        if self.var_regex.get():
+            try: pat = re.compile(find, 0 if self.var_case.get() else re.I)
+            except: messagebox.showerror("Error", "Bad Regex"); return
+
+        self.prog['maximum'] = len(files); hits = 0; mods = 0
+        namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
+        
+        if mode == "find":
+            for i in self.res_tree.get_children(): self.res_tree.delete(i)
+
+        for i, fp in enumerate(files):
+            try:
+                t = etree.parse(str(fp)); dirty = False
+                for tu in t.xpath('//xliff:trans-unit', namespaces=namespaces):
+                    tn = tu.find('xliff:target', namespaces=namespaces)
+                    if tn is not None and tn.text:
+                        orig = tn.text; new = orig; found = False
+                        if self.var_regex.get(): 
+                            if pat.search(orig): found=True; new=pat.sub(repl, orig) if mode=="replace" else orig
+                        else:
+                            if self.var_case.get(): found=(find in orig); new=orig.replace(find, repl) if found and mode=="replace" else orig
+                            else: found=(find.lower() in orig.lower()); new=re.compile(re.escape(find), re.I).sub(repl, orig) if found and mode=="replace" else orig
+                        
+                        if found:
+                            hits+=1
+                            if mode=="find": 
+                                display_name = fp.name if scope != "current_file" else tu.get('id')
+                                self.res_tree.insert("", "end", values=(display_name, orig[:50]), tags=(str(fp), tu.get('id')))
+                            if mode=="replace" and new!=orig: tn.text=new; tn.set('state', 'translated'); dirty=True
+                
+                if dirty and mode=="replace":
+                    mods+=1
+                    if self.var_back.get(): shutil.copy2(fp, str(fp)+".bak")
+                    t.write(str(fp), encoding="UTF-8", xml_declaration=True, pretty_print=True)
+            except: pass
+            self.prog['value'] = i+1; self.update_idletasks()
+        
+        if mode=="replace": 
+            messagebox.showinfo("Done", f"Replaced {hits} in {mods} files.")
+            if self.editor.current_file: self.editor.load_file(self.editor.current_file)
+
+    def jump_to_result(self, event):
+        sel = self.res_tree.selection()
+        if not sel: return
+        item = self.res_tree.item(sel[0]); tags = self.res_tree.item(sel[0], 'tags')
+        f_path = tags[0]; t_id = tags[1]
+        
+        if str(self.editor.current_file) != str(f_path): 
+            self.editor.load_file(f_path)
+            
+        for c in self.editor.tree.get_children():
+            if str(self.editor.tree.item(c, 'values')[0]) == str(t_id): 
+                self.editor.tree.selection_set(c)
+                self.editor.tree.see(c)
+                self.editor.on_row_select(None)
+                break
