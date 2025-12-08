@@ -28,6 +28,7 @@ class EditorTab(ttk.Frame):
         self.data_store = []
         self.current_edit_id = None
         
+        # Flags
         self.sidebar_visible = True
         self.glossary_visible = True
         self.find_visible = False
@@ -118,6 +119,7 @@ class EditorTab(ttk.Frame):
         grid_scroll.pack(side=RIGHT, fill=Y)
         self.tree.pack(fill=BOTH, expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.on_row_select)
+        
         self.create_context_menus()
         self.tree.bind("<Button-3>", self.show_grid_menu)
 
@@ -163,6 +165,7 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
 
         # 3. RIGHT SIDEBAR (CONTAINER)
+        # We start with it added, but its children dictate what's shown
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
         
@@ -178,11 +181,13 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
-        # Find Pane (Initially Hidden)
+        # Find & Replace Pane (Initially Hidden)
+        # Note: We create it but don't pack it yet
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
-    # --- LAYOUT LOGIC ---
+    # --- LAYOUT TOGGLING LOGIC ---
     def update_sidebar_visibility(self):
+        """Show/Hide the main right sidebar container based on children."""
         if not self.glossary_visible and not self.find_visible:
             self.main_split.forget(self.right_sidebar)
         else:
@@ -358,20 +363,6 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Control-u>", lambda e: self.format_text("u") or "break")
         self.bind_all("<Control-Q>", self.toggle_admin_mode)
 
-    # --- FIX: RE-ADD APPLY_FILTER HERE ---
-    def apply_filter(self, event=None):
-        for i in self.tree.get_children(): self.tree.delete(i)
-        status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
-        status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
-        for rec in self.data_store:
-            rec_status = str(rec['status']).lower().replace(" ", "").replace("-", "")
-            filter_clean = status_filter.replace(" ", "").replace("-", "")
-            if status_filter != "all" and rec_status != filter_clean: continue
-            if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
-            tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
-            icon = status_map.get(str(rec['status']).lower(), '❓')
-            self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
-
     def create_context_menus(self):
         self.menu_grid = tk.Menu(self, tearoff=0)
         self.menu_grid.add_command(label="Copy Source", command=self.copy_source_to_target)
@@ -395,3 +386,17 @@ class EditorTab(ttk.Frame):
     def text_paste(self, w):
         try: w.insert(tk.INSERT, self.clipboard_get())
         except: pass
+    
+    # --- MISSING APPLY_FILTER ---
+    def apply_filter(self, event=None):
+        for i in self.tree.get_children(): self.tree.delete(i)
+        status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
+        status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
+        for rec in self.data_store:
+            rec_status = str(rec['status']).lower().replace(" ", "").replace("-", "")
+            filter_clean = status_filter.replace(" ", "").replace("-", "")
+            if status_filter != "all" and rec_status != filter_clean: continue
+            if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
+            tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
+            icon = status_map.get(str(rec['status']).lower(), '❓')
+            self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
