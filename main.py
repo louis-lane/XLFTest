@@ -13,6 +13,7 @@ class MainApp(ttk.Window):
         self.geometry("1000x750")
 
         # --- SET ICON ---
+        # Look for the icon in the current folder (Standard method)
         if getattr(sys, 'frozen', False):
             app_path = Path(sys.executable).parent
         else:
@@ -53,16 +54,13 @@ class MainApp(ttk.Window):
     def show_help(self):
         help_win = ttk.Toplevel(self)
         help_win.title("Keyboard Shortcuts")
-        # UPDATED GEOMETRY: Increased height to 600 to prevent cutoff
         help_win.geometry("500x600")
         
-        # Center content
         content = ttk.Frame(help_win, padding=20)
         content.pack(fill='both', expand=True)
         
         ttk.Label(content, text="Editor Shortcuts", font=("Helvetica", 14, "bold"), bootstyle="info").pack(pady=(0, 20))
         
-        # Helper to create rows
         def add_hotkey_row(keys, desc):
             row = ttk.Frame(content)
             row.pack(fill='x', pady=5)
