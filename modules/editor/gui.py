@@ -24,11 +24,38 @@ class EditorTab(ttk.Frame):
         self.glossary_visible = True
         self.admin_mode_active = False 
         
-        # --- MAIN LAYOUT: 3 COLUMNS ---
+        # --- 1. GLOBAL TOOLBAR (The "Ribbon") ---
+        # This sits above the 3-pane layout, spanning the full width
+        self.toolbar = ttk.Frame(self, padding=(5, 5))
+        self.toolbar.pack(side=TOP, fill=X)
+
+        # Left Side of Toolbar (File Toggle)
+        self.btn_toggle_sidebar = ttk.Button(self.toolbar, text="🗖 Files", command=self.toggle_sidebar, bootstyle="secondary-outline")
+        self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 15))
+
+        # Center of Toolbar (Search & Filter)
+        ttk.Label(self.toolbar, text="Search:").pack(side=LEFT, padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(self.toolbar, textvariable=self.search_var, width=30)
+        self.search_entry.pack(side=LEFT, padx=(0, 15))
+        self.search_entry.bind("<KeyRelease>", self.apply_filter)
+
+        ttk.Label(self.toolbar, text="Filter Status:").pack(side=LEFT, padx=(0, 5))
+        self.filter_var = tk.StringVar(value="All")
+        self.filter_combo = ttk.Combobox(self.toolbar, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=15)
+        self.filter_combo.pack(side=LEFT)
+        self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
+
+        # Right Side of Toolbar (Glossary Toggle & Find)
+        ttk.Button(self.toolbar, text="🔍 Find & Replace", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT, padx=5)
+        self.btn_toggle_glossary = ttk.Button(self.toolbar, text="📖 Glossary", command=self.toggle_glossary, bootstyle="info-outline")
+        self.btn_toggle_glossary.pack(side=RIGHT, padx=5)
+
+        # --- 2. MAIN LAYOUT: 3 COLUMNS ---
         self.main_split = tk_ttk.PanedWindow(self, orient=HORIZONTAL)
         self.main_split.pack(fill=BOTH, expand=True, padx=5, pady=5)
 
-        # 1. LEFT SIDEBAR
+        # LEFT SIDEBAR
         self.sidebar_frame = ttk.Frame(self.main_split)
         self.main_split.add(self.sidebar_frame, weight=1)
         
@@ -44,37 +71,15 @@ class EditorTab(ttk.Frame):
         self.file_tree.pack(side=LEFT, fill=BOTH, expand=True)
         self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
 
-        # 2. CENTER CONTENT
+        # CENTER CONTENT
         self.content_area = ttk.Frame(self.main_split)
         self.main_split.add(self.content_area, weight=4)
 
-        # --- CENTER TOP CONTROLS ---
-        top_controls = ttk.Frame(self.content_area, padding=(0, 0, 0, 5))
-        top_controls.pack(fill=X)
-
-        self.btn_toggle_sidebar = ttk.Button(top_controls, text="🗖 Files", command=self.toggle_sidebar, bootstyle="secondary-outline")
-        self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
-
-        ttk.Label(top_controls, text="Search:").pack(side=LEFT, padx=(0, 5))
-        self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(top_controls, textvariable=self.search_var, width=25)
-        self.search_entry.pack(side=LEFT, padx=(0, 10))
-        self.search_entry.bind("<KeyRelease>", self.apply_filter)
-
-        ttk.Label(top_controls, text="Filter:").pack(side=LEFT, padx=(5, 5))
-        self.filter_var = tk.StringVar(value="All")
-        self.filter_combo = ttk.Combobox(top_controls, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=12)
-        self.filter_combo.pack(side=LEFT)
-        self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
-
-        self.btn_toggle_glossary = ttk.Button(top_controls, text="📖 Glossary", command=self.toggle_glossary, bootstyle="info-outline")
-        self.btn_toggle_glossary.pack(side=RIGHT, padx=(10, 0))
-        ttk.Button(top_controls, text="🔍 Find", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT)
-
-        # --- CENTER SPLIT ---
+        # --- CENTER SPLIT (Grid Top / Edit Bottom) ---
         self.editor_split = tk_ttk.PanedWindow(self.content_area, orient=VERTICAL)
         self.editor_split.pack(fill=BOTH, expand=True)
         
+        # Grid Pane
         self.grid_frame = ttk.Frame(self.editor_split)
         self.editor_split.add(self.grid_frame, weight=3)
         
@@ -95,24 +100,35 @@ class EditorTab(ttk.Frame):
         self.tree.bind("<Button-3>", self.show_grid_menu)
         self.tree.bind("<Button-2>", self.show_grid_menu) 
 
+        # --- EDIT PANEL ---
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=2)
         
-        controls_bot = ttk.Frame(self.edit_panel)
-        controls_bot.pack(side=BOTTOM, fill=X, pady=5)
+        # 1. CONTROL HEADER (Moved from Bottom to Top of Edit Panel)
+        # This creates a "Toolbar" for the specific editor box, similar to Smartcat
+        controls_header = ttk.Frame(self.edit_panel)
+        controls_header.pack(side=TOP, fill=X, pady=(0, 10))
 
-        ttk.Label(controls_bot, text="Status:").pack(side=LEFT, padx=(0, 5))
+        # Status Dropdown
+        ttk.Label(controls_header, text="Set Status:").pack(side=LEFT, padx=(0, 5))
         self.edit_status_var = tk.StringVar()
-        self.status_dropdown = ttk.Combobox(controls_bot, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
+        self.status_dropdown = ttk.Combobox(controls_header, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
         self.status_dropdown.pack(side=LEFT)
 
-        btn_nav_frame = ttk.Frame(controls_bot)
+        # Navigation & Save
+        btn_nav_frame = ttk.Frame(controls_header)
         btn_nav_frame.pack(side=RIGHT)
-        ttk.Button(btn_nav_frame, text="<", command=lambda: self.navigate_grid(-1), bootstyle="secondary-outline").pack(side=LEFT, padx=2)
-        ttk.Button(btn_nav_frame, text=">", command=lambda: self.navigate_grid(1), bootstyle="secondary-outline").pack(side=LEFT, padx=2)
-        ttk.Button(btn_nav_frame, text="Save & Next", command=self.save_and_next, bootstyle="success").pack(side=LEFT, padx=5)
         
-        ttk.Label(self.edit_panel, text="Original Source:", font=("Helvetica", 9, "bold")).pack(anchor=W)
+        # Hotkey Hint
+        ttk.Label(btn_nav_frame, text="[Ctrl+Enter to Save]", font=("Helvetica", 8), foreground="gray").pack(side=LEFT, padx=10)
+        
+        ttk.Button(btn_nav_frame, text="<", command=lambda: self.navigate_grid(-1), bootstyle="secondary-outline", width=3).pack(side=LEFT, padx=2)
+        ttk.Button(btn_nav_frame, text=">", command=lambda: self.navigate_grid(1), bootstyle="secondary-outline", width=3).pack(side=LEFT, padx=2)
+        ttk.Button(btn_nav_frame, text="Save & Next", command=self.save_and_next, bootstyle="success").pack(side=LEFT, padx=(10, 0))
+
+        # 2. TEXT AREAS
+        # Source
+        ttk.Label(self.edit_panel, text="Original Source:", font=("Helvetica", 9, "bold"), bootstyle="inverse-secondary").pack(anchor=W)
         src_frame = ttk.Frame(self.edit_panel)
         src_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
         src_scroll = ttk.Scrollbar(src_frame, orient=VERTICAL)
@@ -122,7 +138,8 @@ class EditorTab(ttk.Frame):
         self.txt_source.pack(side=LEFT, fill=BOTH, expand=True)
         self.txt_source.bind("<Button-3>", self.show_source_menu)
         
-        ttk.Label(self.edit_panel, text="Translation Target:", font=("Helvetica", 9, "bold")).pack(anchor=W)
+        # Target
+        ttk.Label(self.edit_panel, text="Translation Target:", font=("Helvetica", 9, "bold"), bootstyle="inverse-secondary").pack(anchor=W)
         tgt_frame = ttk.Frame(self.edit_panel)
         tgt_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
         tgt_scroll = ttk.Scrollbar(tgt_frame, orient=VERTICAL)
@@ -132,7 +149,7 @@ class EditorTab(ttk.Frame):
         self.txt_target.pack(side=LEFT, fill=BOTH, expand=True)
         self.txt_target.bind("<Button-3>", self.show_target_menu)
 
-        # 3. RIGHT SIDEBAR (Glossary)
+        # RIGHT SIDEBAR (Glossary)
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
 
@@ -155,7 +172,7 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl_frame.pack(side=BOTTOM, fill=X, pady=5)
         ttk.Label(self.gloss_ctrl_frame, text="Double-click to insert", font=("Helvetica", 7), foreground="gray").pack(side=LEFT)
         
-        # --- ADMIN BUTTON (Hidden by Default) ---
+        # Admin Button
         self.btn_add_term = ttk.Button(self.gloss_ctrl_frame, text="+ Add Term", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
         self.xml_tree = None
@@ -209,24 +226,16 @@ class EditorTab(ttk.Frame):
         c_lang.pack(fill=X, pady=(0, 15))
         c_lang.set(default_lang)
 
-        # --- AUTO-OPEN & FILTER LOGIC (FIXED) ---
+        # --- AUTO-OPEN & FILTER LOGIC ---
         def filter_lang_options(event):
-            # Ignore special keys to allow navigation
-            if event.keysym in ['Up', 'Down', 'Return', 'Left', 'Right', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R']:
-                return
-
+            if event.keysym in ['Up', 'Down', 'Return', 'Left', 'Right', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R']: return
             typed = c_lang.get()
-            if typed == '':
-                c_lang['values'] = all_langs
+            if typed == '': c_lang['values'] = all_langs
             else:
                 filtered = [x for x in all_langs if typed.lower() in x.lower()]
                 c_lang['values'] = filtered
-            
-            # Post the listbox WITHOUT selecting/stealing focus
-            # This is the Tcl command to just "show" the list
             try:
-                if c_lang['values']:
-                    c_lang.tk.call('ttk::combobox::Post', c_lang._w)
+                if c_lang['values']: c_lang.tk.call('ttk::combobox::Post', c_lang._w)
             except: pass
 
         c_lang.bind('<KeyRelease>', filter_lang_options)
