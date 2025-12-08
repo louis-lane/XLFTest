@@ -167,6 +167,7 @@ class EditorTab(ttk.Frame):
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
         
+        # Glossary Pane (Initially Visible)
         self.glossary_frame = ttk.Labelframe(self.right_sidebar, text="Glossary", padding=5, bootstyle="info")
         self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
         
@@ -178,6 +179,7 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
+        # Find Pane (Initially Hidden)
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
     # --- LAYOUT LOGIC ---
