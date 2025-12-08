@@ -2,7 +2,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from modules.converter.gui import ConverterTab
 from modules.editor.gui import EditorTab
-from utils.shared import center_window # <--- IMPORTED
+from utils.shared import center_window
 import os
 from pathlib import Path
 import sys
@@ -11,7 +11,14 @@ class MainApp(ttk.Window):
     def __init__(self):
         super().__init__(themename="darkly") 
         self.title("Localization Toolkit")
+        
+        # Set a default size just in case, but attempt to maximize immediately
         self.geometry("1400x900")
+        try:
+            self.state('zoomed')
+        except:
+            # Fallback for some Linux environments that handle this differently
+            self.attributes('-zoomed', True)
 
         # --- SET ICON ---
         if getattr(sys, 'frozen', False):
@@ -50,7 +57,7 @@ class MainApp(ttk.Window):
         help_win = ttk.Toplevel(self)
         help_win.title("Keyboard Shortcuts")
         
-        # --- USE SHARED CENTER FUNCTION ---
+        # Use shared center function
         center_window(help_win, 500, 600, self) 
         
         content = ttk.Frame(help_win, padding=20)
@@ -68,6 +75,9 @@ class MainApp(ttk.Window):
         add_hotkey_row("Ctrl + Up", "Previous Segment")
         add_hotkey_row("Ctrl + Down", "Next Segment")
         ttk.Separator(content, orient='horizontal').pack(fill='x', pady=15)
+        
+        add_hotkey_row("Ctrl + B/I/U", "Bold / Italic / Underline")
+        add_hotkey_row("Ctrl + Z/Y", "Undo / Redo")
         add_hotkey_row("Alt + S", "Replace with Source")
         add_hotkey_row("Alt + C", "Copy Source Text")
         
