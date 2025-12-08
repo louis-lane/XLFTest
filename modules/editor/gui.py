@@ -28,6 +28,7 @@ class EditorTab(ttk.Frame):
         self.data_store = []
         self.current_edit_id = None
         
+        # Flags
         self.sidebar_visible = True
         self.glossary_visible = True
         self.find_visible = False
@@ -163,10 +164,12 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Button-3>", self.show_target_menu)
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
 
-        # 3. RIGHT SIDEBAR
+        # 3. RIGHT SIDEBAR (CONTAINER)
+        # We start with it added, but its children dictate what's shown
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
         
+        # Glossary Pane (Initially Visible)
         self.glossary_frame = ttk.Labelframe(self.right_sidebar, text="Glossary", padding=5, bootstyle="info")
         self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
         
@@ -178,36 +181,50 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
+        # Find & Replace Pane (Initially Hidden)
+        # Note: We create it but don't pack it yet
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
-    # --- LAYOUT LOGIC ---
+    # --- LAYOUT TOGGLING LOGIC (FIXED) ---
     def update_sidebar_visibility(self):
+        """Show/Hide the main right sidebar container based on children."""
         if not self.glossary_visible and not self.find_visible:
+            # Both hidden -> Hide sidebar
             self.main_split.forget(self.right_sidebar)
         else:
+            # At least one visible -> Show sidebar
             if self.main_split.index(self.right_sidebar) < 0: 
                 self.main_split.add(self.right_sidebar, weight=1)
     
     def toggle_glossary(self):
         if self.glossary_visible:
-            self.glossary_frame.pack_forget(); self.btn_toggle_glossary.configure(bootstyle="info")
+            self.glossary_frame.pack_forget()
+            self.btn_toggle_glossary.configure(bootstyle="info")
         else:
+            # If find is open, we stack. If not, we fill.
+            # Using side=TOP and expand=True for both ensures stacking.
             self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
             self.btn_toggle_glossary.configure(bootstyle="info-outline")
+        
         self.glossary_visible = not self.glossary_visible
         self.update_sidebar_visibility()
 
     def toggle_find_replace(self):
         if self.find_visible:
-            self.find_pane.pack_forget(); self.btn_toggle_find.configure(bootstyle="warning-outline")
+            self.find_pane.pack_forget()
+            self.btn_toggle_find.configure(bootstyle="warning-outline")
         else:
-            self.find_pane.pack(side=BOTTOM, fill=X, padx=5, pady=5)
+            # Pack below glossary if open, otherwise fills space
+            self.find_pane.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
             self.btn_toggle_find.configure(bootstyle="warning")
+            
         self.find_visible = not self.find_visible
         self.update_sidebar_visibility()
 
     def open_find_replace_dialog(self):
-        if not self.find_visible: self.toggle_find_replace()
+        # Redirect old method to new toggle logic
+        if not self.find_visible:
+            self.toggle_find_replace()
 
     # --- TAG LOGIC ---
     def on_syntax_change(self, event):
@@ -283,9 +300,8 @@ class EditorTab(ttk.Frame):
                 if start_sel and end_sel: self.txt_target.tag_remove("sel", "1.0", END); self.txt_target.tag_add("sel", start_sel, end_sel)
         except: pass
 
-    # --- STANDARD METHODS ---
     def load_project_folder(self):
-        folder = filedialog.askdirectory()
+        folder = filedialog.askdirectory(); 
         if not folder: return
         self.current_folder = Path(folder)
         for i in self.file_tree.get_children(): self.file_tree.delete(i)
@@ -331,72 +347,6 @@ class EditorTab(ttk.Frame):
         matches = self.logic.find_glossary_matches(source_text, self.current_file)
         for term, trans in matches: self.gloss_tree.insert("", "end", values=(term, trans))
 
-    def save_segment(self):
-        if not self.current_edit_id: return
-        rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
-        if rec:
-            rec['target'] = self.txt_target.get("1.0", "end-1c")
-            rec['status'] = self.edit_status_var.get()
-            tgt_node = rec['node'].find('xliff:target', namespaces=self.logic.namespaces)
-            if tgt_node is None: tgt_node = etree.SubElement(rec['node'], f"{{{self.logic.namespaces['xliff']}}}target")
-            tgt_node.text = rec['target']; tgt_node.set('state', rec['status'])
-            try:
-                self.logic.save_xliff(self.xml_tree, self.current_file)
-                self.restore_selection_after_refresh()
-            except Exception as e: messagebox.showerror("Error", f"Save failed: {e}")
-
-    def restore_selection_after_refresh(self):
-        next_id = None
-        sel = self.tree.selection()
-        if sel:
-            all_items = self.tree.get_children()
-            try:
-                idx = all_items.index(sel[0])
-                if idx + 1 < len(all_items): next_id = self.tree.item(all_items[idx+1], 'values')[0]
-            except ValueError: pass
-        self.apply_filter()
-        target_id = next_id if next_id else self.current_edit_id
-        if target_id:
-            for child in self.tree.get_children():
-                if str(self.tree.item(child, 'values')[0]) == str(target_id):
-                    self.tree.selection_set(child); self.tree.see(child); self.on_row_select(None); self.txt_target.focus_set(); break
-
-    def open_add_term_dialog(self):
-        def on_save():
-            self.logic.load_glossary()
-            if self.current_edit_id:
-                rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
-                if rec: self.refresh_glossary_view(rec['source'])
-        AddTermDialog(self, self.current_file, on_save)
-
-    def toggle_sidebar(self):
-        if self.sidebar_visible: self.main_split.forget(self.sidebar_frame)
-        else: self.main_split.insert(0, self.sidebar_frame, weight=1)
-        self.sidebar_visible = not self.sidebar_visible
-
-    def toggle_glossary(self):
-        if self.glossary_visible: self.main_split.forget(self.right_sidebar)
-        else: self.main_split.add(self.right_sidebar, weight=1)
-        self.glossary_visible = not self.glossary_visible
-
-    def toggle_admin_mode(self, event=None):
-        if self.admin_mode_active: self.btn_add_term.pack_forget()
-        else: self.btn_add_term.pack(side=RIGHT)
-        self.admin_mode_active = not self.admin_mode_active
-
-    def apply_filter(self, event=None):
-        for i in self.tree.get_children(): self.tree.delete(i)
-        status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
-        status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
-        for rec in self.data_store:
-            rec_status = str(rec['status']).lower().replace(" ", "").replace("-", "")
-            filter_clean = status_filter.replace(" ", "").replace("-", "")
-            if status_filter != "all" and rec_status != filter_clean: continue
-            if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
-            tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
-            icon = status_map.get(str(rec['status']).lower(), '❓')
-            self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
-
     def insert_glossary_term(self, event):
         sel = self.gloss_tree.selection()
         if not sel: return
@@ -407,7 +357,27 @@ class EditorTab(ttk.Frame):
         self.txt_target.insert(tk.INSERT, translation)
 
     def save_and_next(self):
+        next_id = None; sel = self.tree.selection()
+        if sel:
+            all_items = self.tree.get_children(); idx = all_items.index(sel[0])
+            if idx + 1 < len(all_items): next_id = self.tree.item(all_items[idx+1], 'values')[0]
         self.save_segment() 
+        if next_id:
+            for child in self.tree.get_children():
+                if str(self.tree.item(child, 'values')[0]) == str(next_id):
+                    self.tree.selection_set(child); self.tree.see(child); self.on_row_select(None); self.txt_target.focus_set(); break
+
+    def save_segment(self):
+        if not self.current_edit_id: return
+        rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+        if rec:
+            rec['target'] = self.txt_target.get("1.0", "end-1c")
+            rec['status'] = self.edit_status_var.get()
+            tgt_node = rec['node'].find('xliff:target', namespaces=self.logic.namespaces)
+            if tgt_node is None: tgt_node = etree.SubElement(rec['node'], f"{{{self.logic.namespaces['xliff']}}}target")
+            tgt_node.text = rec['target']; tgt_node.set('state', rec['status'])
+            try: self.logic.save_xliff(self.xml_tree, self.current_file); self.apply_filter()
+            except Exception as e: messagebox.showerror("Error", f"Save failed: {e}")
 
     def navigate_grid(self, direction):
         sel = self.tree.selection(); items = self.tree.get_children()
@@ -416,13 +386,31 @@ class EditorTab(ttk.Frame):
         if sel: new_idx = max(0, min(len(items)-1, items.index(sel[0]) + direction))
         self.tree.selection_set(items[new_idx]); self.tree.see(items[new_idx]); self.on_row_select(None)
 
-    def setup_hotkeys(self):
-        self.txt_target.bind("<Control-Return>", lambda e: self.save_and_next())
-        self.txt_target.bind("<Control-b>", lambda e: self.format_text("b") or "break")
-        self.txt_target.bind("<Control-i>", lambda e: self.format_text("i") or "break")
-        self.txt_target.bind("<Control-u>", lambda e: self.format_text("u") or "break")
-        self.bind_all("<Control-Q>", self.toggle_admin_mode)
+    def toggle_sidebar(self):
+        if self.sidebar_visible: self.main_split.forget(self.sidebar_frame)
+        else: self.main_split.insert(0, self.sidebar_frame, weight=1)
+        self.sidebar_visible = not self.sidebar_visible
 
+    def toggle_admin_mode(self, event=None):
+        if self.admin_mode_active: self.btn_add_term.pack_forget()
+        else: self.btn_add_term.pack(side=RIGHT)
+        self.admin_mode_active = not self.admin_mode_active
+
+    def open_add_term_dialog(self):
+        def on_save():
+            self.logic.load_glossary()
+            if self.current_edit_id:
+                rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+                if rec: self.refresh_glossary_view(rec['source'])
+        AddTermDialog(self, self.current_file, on_save)
+
+    def text_copy(self, w): 
+        try: self.clipboard_clear(); self.clipboard_append(w.get("sel.first", "sel.last"))
+        except: pass
+    def text_paste(self, w):
+        try: w.insert(tk.INSERT, self.clipboard_get())
+        except: pass
+    
     def create_context_menus(self):
         self.menu_grid = tk.Menu(self, tearoff=0)
         self.menu_grid.add_command(label="Copy Source", command=self.copy_source_to_target)
@@ -440,9 +428,3 @@ class EditorTab(ttk.Frame):
             rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
             if rec: self.txt_target.delete("1.0", END); self.txt_target.insert("1.0", rec['source'])
     def clear_target(self): self.txt_target.delete("1.0", END)
-    def text_copy(self, w): 
-        try: self.clipboard_clear(); self.clipboard_append(w.get("sel.first", "sel.last"))
-        except: pass
-    def text_paste(self, w):
-        try: w.insert(tk.INSERT, self.clipboard_get())
-        except: pass
