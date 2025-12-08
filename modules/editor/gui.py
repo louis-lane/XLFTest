@@ -177,12 +177,14 @@ class EditorTab(ttk.Frame):
         self.gloss_tree.bind("<Double-1>", self.insert_glossary_term)
         
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
+        # THIS was the line causing the error because the function it pointed to didn't exist
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
+        self.btn_add_term.pack(side=RIGHT)
 
         # Find Pane (Initially Hidden)
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
-    # --- LAYOUT LOGIC ---
+    # --- LAYOUT LOGIC (New Functions Added) ---
     def toggle_sidebar(self):
         """Toggles the Left File Explorer sidebar."""
         if self.sidebar_visible:
@@ -221,7 +223,7 @@ class EditorTab(ttk.Frame):
     def open_find_replace_dialog(self):
         if not self.find_visible: self.toggle_find_replace()
 
-    # --- POPUP LOGIC ---
+    # --- POPUP LOGIC (New Function Added) ---
     def open_add_term_dialog(self):
         # Initializes the AddTermDialog with self as parent and the logic engine
         AddTermDialog(self, self.logic)
@@ -363,8 +365,8 @@ class EditorTab(ttk.Frame):
         self.txt_target.insert(tk.INSERT, translation)
 
     def save_and_next(self):
-        # NOTE: This ensures you don't crash if you click the Save button.
-        # You will need to implement the actual saving logic here later.
+        # NOTE: logic.save_segment or similar needs to be called here.
+        # Assuming you will implement save_segment or it's handled in logic.py
         pass 
 
     def navigate_grid(self, direction):
@@ -383,6 +385,7 @@ class EditorTab(ttk.Frame):
         
     def toggle_admin_mode(self, event=None):
         self.admin_mode_active = not self.admin_mode_active
+        # Add visual feedback or logic for admin mode here if needed
         print(f"Admin mode: {self.admin_mode_active}")
 
     def create_context_menus(self):
@@ -409,7 +412,7 @@ class EditorTab(ttk.Frame):
         try: w.insert(tk.INSERT, self.clipboard_get())
         except: pass
     
-    # --- FILTER FUNCTION ---
+    # --- RE-ADDED MISSING FILTER FUNCTION ---
     def apply_filter(self, event=None):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
