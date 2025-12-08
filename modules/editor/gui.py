@@ -5,7 +5,8 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-from utils.shared import get_target_language, log_errors, CONFIG
+# --- IMPORT center_window ---
+from utils.shared import get_target_language, log_errors, CONFIG, center_window
 import shutil
 import re
 import threading
@@ -23,7 +24,7 @@ class ToolTip:
         self.widget.bind("<Leave>", self.hide)
 
     def schedule(self, event):
-        self.id = self.widget.after(600, self.show) # 600ms delay
+        self.id = self.widget.after(600, self.show)
 
     def show(self):
         if self.tip_window or not self.text: return
@@ -62,7 +63,6 @@ class EditorTab(ttk.Frame):
         self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
         ToolTip(self.btn_toggle_sidebar, "Toggle File Sidebar")
         
-        # Global Actions
         btn_copy_src = ttk.Button(self.toolbar, text="➜ Source", command=self.copy_source_to_target, bootstyle="link")
         btn_copy_src.pack(side=LEFT)
         ToolTip(btn_copy_src, "Copy Source Text to Target (Alt+S)")
@@ -73,7 +73,6 @@ class EditorTab(ttk.Frame):
 
         ttk.Separator(self.toolbar, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
         
-        # Center Filter Area
         filter_frame = ttk.Frame(self.toolbar)
         filter_frame.pack(side=LEFT, padx=20)
 
@@ -90,7 +89,6 @@ class EditorTab(ttk.Frame):
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
         ToolTip(self.filter_combo, "Filter by Segment Status")
 
-        # Right Side Tools
         btn_find = ttk.Button(self.toolbar, text="🔍 Find", command=self.open_find_replace_dialog, bootstyle="warning-outline")
         btn_find.pack(side=RIGHT, padx=5)
         ToolTip(btn_find, "Advanced Find & Replace")
@@ -152,11 +150,10 @@ class EditorTab(ttk.Frame):
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=2)
         
-        # HEADER CONTROLS (Status + Formatting)
+        # HEADER CONTROLS
         controls_header = ttk.Frame(self.edit_panel)
         controls_header.pack(side=TOP, fill=X, pady=(0, 10))
 
-        # Status Dropdown
         ttk.Label(controls_header, text="Set Status:").pack(side=LEFT, padx=(0, 5))
         self.edit_status_var = tk.StringVar()
         self.status_dropdown = ttk.Combobox(controls_header, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
@@ -164,22 +161,18 @@ class EditorTab(ttk.Frame):
         ToolTip(self.status_dropdown, "Change status for this segment")
 
         # Formatting Buttons
-        # Bold
         btn_b = ttk.Button(controls_header, text="B", command=lambda: self.insert_tag("b"), bootstyle="secondary-outline", width=2)
         btn_b.pack(side=LEFT, padx=1)
         ToolTip(btn_b, "Bold (Ctrl+B)")
-        # Italic
         btn_i = ttk.Button(controls_header, text="I", command=lambda: self.insert_tag("i"), bootstyle="secondary-outline", width=2)
         btn_i.pack(side=LEFT, padx=1)
         ToolTip(btn_i, "Italic (Ctrl+I)")
-        # Underline
         btn_u = ttk.Button(controls_header, text="U", command=lambda: self.insert_tag("u"), bootstyle="secondary-outline", width=2)
         btn_u.pack(side=LEFT, padx=1)
         ToolTip(btn_u, "Underline (Ctrl+U)")
         
         ttk.Separator(controls_header, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
 
-        # Undo/Redo
         btn_undo = ttk.Button(controls_header, text="↶", command=lambda: self.txt_target.edit_undo(), bootstyle="secondary-outline", width=2)
         btn_undo.pack(side=LEFT, padx=1)
         ToolTip(btn_undo, "Undo (Ctrl+Z)")
@@ -188,7 +181,7 @@ class EditorTab(ttk.Frame):
         btn_redo.pack(side=LEFT, padx=1)
         ToolTip(btn_redo, "Redo (Ctrl+Y)")
 
-        # Navigation & Save (Far Right)
+        # Navigation & Save
         btn_nav_frame = ttk.Frame(controls_header)
         btn_nav_frame.pack(side=RIGHT)
         
@@ -222,7 +215,6 @@ class EditorTab(ttk.Frame):
         tgt_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
         tgt_scroll = ttk.Scrollbar(tgt_frame, orient=VERTICAL)
         
-        # NOTE: undo=True enables built-in stack for Ctrl+Z/Ctrl+Y
         self.txt_target = tk.Text(tgt_frame, height=4, bg="white", fg="black", insertbackground="black", wrap="word", undo=True, maxundo=50, yscrollcommand=tgt_scroll.set)
         tgt_scroll.config(command=self.txt_target.yview)
         tgt_scroll.pack(side=RIGHT, fill=Y)
@@ -292,7 +284,7 @@ class EditorTab(ttk.Frame):
     def open_add_term_dialog(self):
         d = ttk.Toplevel(self)
         d.title("Add Glossary Term")
-        d.geometry("500x550") 
+        center_window(d, 500, 550, self) 
         main_frame = ttk.Frame(d, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
         
@@ -451,6 +443,8 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Control-b>", lambda e: self.insert_tag("b") or "break")
         self.txt_target.bind("<Control-i>", lambda e: self.insert_tag("i") or "break")
         self.txt_target.bind("<Control-u>", lambda e: self.insert_tag("u") or "break")
+        self.txt_target.bind("<Control-z>", lambda e: self.txt_target.edit_undo() or "break")
+        self.txt_target.bind("<Control-y>", lambda e: self.txt_target.edit_redo() or "break")
         
         self.tree.bind("<Control-Up>", lambda e: self.navigate_grid(-1))
         self.tree.bind("<Control-Down>", lambda e: self.navigate_grid(1))
@@ -606,10 +600,7 @@ class EditorTab(ttk.Frame):
     def copy_source_to_target(self):
         # Specific handler for the toolbar button (acting on single edit or multi)
         if self.tree.selection():
-            for i in self.tree.selection():
-                uid = self.tree.item(i, 'values')[0]; rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
-                if rec: self._update_single_record(rec, rec['source'], "translated")
-            self._save_and_refresh()
+            self.copy_source_to_target() # Use existing loop
         elif self.current_edit_id:
             rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
             if rec: 
@@ -621,10 +612,22 @@ class EditorTab(ttk.Frame):
             uid = self.tree.item(i, 'values')[0]; rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
             if rec: self._update_single_record(rec, rec['target'], st)
         self._save_and_refresh()
+    def copy_source_to_target(self):
+        # Specific handler for the toolbar button (acting on single edit or multi)
+        if self.tree.selection():
+            for i in self.tree.selection():
+                uid = self.tree.item(i, 'values')[0]; rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
+                if rec: self._update_single_record(rec, rec['source'], "translated")
+            self._save_and_refresh()
+        elif self.current_edit_id:
+            rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+            if rec: 
+                self.txt_target.delete("1.0", END)
+                self.txt_target.insert("1.0", rec['source'])
 
     def open_find_replace_dialog(self):
         if not self.current_folder: messagebox.showwarning("Warning", "Open project first."); return
-        d = ttk.Toplevel(self); d.title("Find & Replace"); d.geometry("700x800")
+        d = ttk.Toplevel(self); d.title("Find & Replace"); center_window(d, 700, 800, self)
         f1 = ttk.Frame(d, padding=10); f1.pack(fill=X)
         ttk.Label(f1, text="Find:").pack(anchor=W); e_find = ttk.Entry(f1); e_find.pack(fill=X)
         ttk.Label(f1, text="Replace:").pack(anchor=W); e_repl = ttk.Entry(f1); e_repl.pack(fill=X)
