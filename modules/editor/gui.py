@@ -209,10 +209,10 @@ class EditorTab(ttk.Frame):
         c_lang.pack(fill=X, pady=(0, 15))
         c_lang.set(default_lang)
 
-        # --- AUTO-OPEN & FILTER LOGIC ---
+        # --- AUTO-OPEN & FILTER LOGIC (FIXED) ---
         def filter_lang_options(event):
-            # Ignore standard nav keys so user can move up/down
-            if event.keysym in ['Up', 'Down', 'Return', 'Left', 'Right']:
+            # Ignore special keys to allow navigation
+            if event.keysym in ['Up', 'Down', 'Return', 'Left', 'Right', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R']:
                 return
 
             typed = c_lang.get()
@@ -222,11 +222,12 @@ class EditorTab(ttk.Frame):
                 filtered = [x for x in all_langs if typed.lower() in x.lower()]
                 c_lang['values'] = filtered
             
-            # Force dropdown open to show results
+            # Post the listbox WITHOUT selecting/stealing focus
+            # This is the Tcl command to just "show" the list
             try:
-                c_lang.event_generate('<Down>') 
-            except: 
-                pass # Safety catch for some OS behaviors
+                if c_lang['values']:
+                    c_lang.tk.call('ttk::combobox::Post', c_lang._w)
+            except: pass
 
         c_lang.bind('<KeyRelease>', filter_lang_options)
 
