@@ -1,11 +1,20 @@
-import threading
+import tkinter as tk
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+import pandas as pd
+from lxml import etree
 from pathlib import Path
-from utils.shared import CONFIG, log_errors
-# Import logic
-from .logic import export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis, apply_deepl_translations
+import re
+from openpyxl.styles import PatternFill
+from datetime import datetime
+import os
+import zlib
+import base64
+import threading
+# --- IMPORT center_window ---
+from utils.shared import get_target_language, log_errors, compress_ids, decompress_ids, center_window, CONFIG
+from utils.shared import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
 
 class ConverterTab(ttk.Frame):
     def __init__(self, parent):
@@ -31,72 +40,109 @@ class ConverterTab(ttk.Frame):
         # 2. Export
         l1 = ttk.Labelframe(self, text="2. Export for Translation", padding=10, bootstyle="primary")
         l1.pack(fill=X, pady=10)
-        ttk.Button(l1, text="Create Excel Masters", command=lambda: self.start_thread(self.run_export), bootstyle="primary").pack(fill=X, pady=2)
-        ttk.Button(l1, text="Apply DeepL Translations", command=lambda: self.start_thread(self.run_apply_deepl), bootstyle="primary-outline").pack(fill=X, pady=2)
+        ttk.Button(l1, text="Create Excel Masters (Step 1)", command=lambda: self.start_thread(self.run_export), bootstyle="primary").pack(fill=X, pady=2)
+        ttk.Button(l1, text="Apply DeepL Translations (Step 1.5)", command=lambda: self.start_thread(self.run_apply_deepl), bootstyle="primary-outline").pack(fill=X, pady=2)
 
         # 3. Import
         l2 = ttk.Labelframe(self, text="3. Import & Reconstruct", padding=10, bootstyle="success")
         l2.pack(fill=X, pady=5)
-        ttk.Button(l2, text="Reconstruct XLIFFs", command=lambda: self.start_thread(self.run_import), bootstyle="success").pack(fill=X)
-        
-        # Status Bar
-        self.progress = ttk.Progressbar(self, mode='indeterminate', bootstyle="success-striped")
+        ttk.Button(l2, text="Reconstruct XLIFFs (Step 2)", command=lambda: self.start_thread(self.run_import), bootstyle="success").pack(fill=X)
 
-    # --- THREADING HELPERS ---
+        # Status Bar
+        self.status_frame = ttk.Frame(self)
+        self.status_frame.pack(side=BOTTOM, fill=X, pady=10)
+        self.progress = ttk.Progressbar(self.status_frame, mode='indeterminate', bootstyle="success-striped")
+        self.status_label = ttk.Label(self.status_frame, text="Ready", font=("Helvetica", 9))
+        self.status_label.pack(side=LEFT)
+
     def start_thread(self, target_func):
-        self.progress.pack(fill=X, pady=5)
+        self.progress.pack(side=RIGHT, fill=X, expand=True, padx=10)
         self.progress.start(10)
-        threading.Thread(target=self.run_wrapper, args=(target_func,)).start()
+        self.status_label.config(text="Processing... Please wait.")
+        thread = threading.Thread(target=self.run_wrapper, args=(target_func,))
+        thread.start()
 
     def run_wrapper(self, func):
-        try: func()
+        try: func() 
         finally: self.after(0, self.stop_progress)
 
     def stop_progress(self):
         self.progress.stop()
         self.progress.pack_forget()
-
-    # --- LOGIC WRAPPERS ---
-    def load_glossary(self):
-        path = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
-        if path:
-            self.glossary_path = path
-            self.glossary_label.config(text=f"Using: {Path(path).name}", foreground="green")
+        self.status_label.config(text="Ready")
 
     def auto_load_glossary(self):
-        if Path("glossary.xlsx").exists():
-            self.glossary_path = "glossary.xlsx"
-            self.glossary_label.config(text="Using: glossary.xlsx", foreground="green")
+        default_path = Path("glossary.xlsx")
+        if default_path.exists(): self.set_glossary(default_path)
 
-    # --- THE ANALYSIS LOGIC ---
-    def run_analysis(self):
-        # 1. Ask for folder (Must be on main thread)
-        root = filedialog.askdirectory(title="Select Root Folder to Analyze")
-        if not root: return
+    def load_glossary(self):
+        filepath = filedialog.askopenfilename(title="Select Glossary Excel File", filetypes=[("Excel files", "*.xlsx")])
+        if filepath: self.set_glossary(filepath)
 
-        # 2. Run heavy logic in thread
+    def set_glossary(self, path):
+        self.glossary_path = path
+        filename = Path(path).name
+        self.glossary_label.config(text=f"Using: {filename}", foreground="green")
+
+    def run_apply_deepl(self):
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
+        if not root_dir: return
         def worker():
             try:
-                data = perform_analysis(Path(root), self.glossary_path)
-                # 3. Show Report (Must be on main thread)
+                updated, total, errors = apply_deepl_translations(Path(root_dir))
+                msg = f"Updated {updated}/{total} files."
+                if errors: 
+                    log_errors(Path(root_dir), errors)
+                    msg += " Check logs."
+                messagebox.showinfo("Result", msg)
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        self.start_thread(worker)
+
+    def run_export(self):
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
+        if not root_dir: return
+        def worker():
+            try:
+                fc, lc, ec = export_to_excel_with_glossary(Path(root_dir), self.glossary_path)
+                messagebox.showinfo("Result", f"Processed {fc} files ({lc} langs). Errors: {ec}")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        self.start_thread(worker)
+
+    def run_import(self):
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
+        if not root_dir: return
+        def worker():
+            try:
+                pc, ec = import_and_reconstruct_with_glossary(Path(root_dir), self.glossary_path)
+                messagebox.showinfo("Result", f"Reconstructed {pc} files. Errors: {ec}")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+        self.start_thread(worker)
+
+    def run_analysis(self):
+        root_dir = filedialog.askdirectory(title="Select Root Folder")
+        if not root_dir: return
+        def worker():
+            try:
+                data = perform_analysis(Path(root_dir), self.glossary_path)
                 self.after(0, lambda: self.display_analysis_report(data))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
-        
+                messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
     def display_analysis_report(self, data):
         report_window = ttk.Toplevel(self)
         report_window.title("Translation Analysis Report")
-        report_window.geometry("800x500")
         
-        # Top Controls
+        # --- USE SHARED CENTER FUNCTION ---
+        center_window(report_window, 800, 500, self) 
+        
         top_frame = ttk.Frame(report_window, padding=10)
         top_frame.pack(fill=X)
-        ttk.Button(top_frame, text="Export to Text File", command=lambda: self.export_report_to_text(data), bootstyle="info-outline").pack(side=RIGHT)
-        ttk.Label(top_frame, text="Project Breakdown", font=("Helvetica", 12, "bold")).pack(side=LEFT)
-
-        # Table
+        ttk.Button(top_frame, text="Export to TXT", command=lambda: self.export_report_to_text(data)).pack()
+        
         cols = ['Language', 'Total Words', 'Repetitions', 'Glossary Matches', 'New Words']
         tree = ttk.Treeview(report_window, columns=cols, show="headings", bootstyle="info")
         
@@ -104,25 +150,21 @@ class ConverterTab(ttk.Frame):
             tree.heading(col, text=col)
             tree.column(col, width=120, anchor='center')
         
-        # Calculate Totals
         totals = {key: 0 for key in ['Total Words', 'Repetitions', 'Glossary Matches', 'New Words']}
-        
         for lang, metrics in data.items():
             row = (lang, metrics['Total Words'], metrics['Repetitions'], metrics['Glossary Matches'], metrics['New Words'])
             tree.insert("", "end", values=row)
             for key in totals:
                 totals[key] += metrics.get(key, 0)
         
-        # Add Total Row
-        tree.insert("", "end", values=()) # Spacer
-        total_row = ('TOTAL (All Langs)', totals['Total Words'], totals['Repetitions'], totals['Glossary Matches'], totals['New Words'])
+        tree.insert("", "end", values=())
+        total_row = ('TOTAL', totals['Total Words'], totals['Repetitions'], totals['Glossary Matches'], totals['New Words'])
         tree.insert("", "end", values=total_row, tags=('totalrow',))
-        tree.tag_configure('totalrow', font=('Helvetica', 10, 'bold'), background="#f0f0f0") # Light grey background for total
-        
+        tree.tag_configure('totalrow', font=('Helvetica', 10, 'bold'))
         tree.pack(expand=True, fill="both", padx=10, pady=10)
 
     def export_report_to_text(self, data):
-        filepath = filedialog.asksaveasfilename(title="Save Report As", defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+        filepath = filedialog.asksaveasfilename(title="Save Report As", defaultextension=".txt", filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
         if not filepath: return
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -140,50 +182,6 @@ class ConverterTab(ttk.Frame):
                 f.write(f"{'-' * sum(widths)}\n")
                 total_values = ['TOTAL', totals['Total Words'], totals['Repetitions'], totals['Glossary Matches'], totals['New Words']]
                 f.write("".join(str(v).ljust(w) for v, w in zip(total_values, widths)) + "\n")
-            messagebox.showinfo("Success", f"Report saved to:\n{filepath}")
+            messagebox.showinfo("Success", f"Report successfully saved to:\n{filepath}")
         except Exception as e:
-            messagebox.showerror("Export Error", str(e))
-
-    def run_export(self):
-        root = filedialog.askdirectory(title="Select Root Folder")
-        if not root: return
-        def worker():
-            try:
-                c, l, e = export_to_excel_with_glossary(Path(root), self.glossary_path)
-                msg = f"Processed {c} files ({l} langs)."
-                if e > 0: msg += f"\nErrors: {e} (See log)"
-                self.after(0, lambda: messagebox.showinfo("Export Result", msg))
-            except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
-        self.start_thread(worker)
-
-    def run_import(self):
-        root = filedialog.askdirectory(title="Select Root Folder")
-        if not root: return
-        def worker():
-            try:
-                c, e = import_and_reconstruct_with_glossary(Path(root), self.glossary_path)
-                msg = f"Reconstructed {c} files."
-                if e > 0: msg += f"\nErrors: {e} (See log)"
-                self.after(0, lambda: messagebox.showinfo("Import Result", msg))
-            except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
-        self.start_thread(worker)
-
-    def run_apply_deepl(self):
-        root = filedialog.askdirectory(title="Select Root Folder")
-        if not root: return
-        # Ask for DeepL folder immediately on main thread
-        deepl_folder = filedialog.askdirectory(title="Select DeepL Translations Folder")
-        if not deepl_folder: return
-
-        def worker():
-            try:
-                # Pass both paths to logic
-                u, t, e = apply_deepl_translations(Path(root), Path(deepl_folder))
-                msg = f"Updated {u}/{t} files."
-                if e: msg += f"\nErrors: {len(e)} (See log)"
-                self.after(0, lambda: messagebox.showinfo("DeepL Result", msg))
-            except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
-        self.start_thread(worker)
+            messagebox.showerror("Export Error", f"Could not save the report: {e}")
