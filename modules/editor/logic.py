@@ -80,37 +80,17 @@ class EditorLogic:
         return matches
 
     def extract_tags(self, text, syntax_mode="Standard XML <>"):
-        """
-        Finds tags using generic patterns and returns ONLY OPENING TAGS.
-        """
         if not text: return []
-        
-        # Generic Patterns that catch ANY tag name (e.g. [list], [actionset], <g>)
         patterns = {
-            # Matches <anything attributes...> OR {var} OR %s
             "Standard XML <>": r"(<[^>/]+[^>]*>|{[^}]+}|%[sd])",  
-            
-            # Matches [anything attributes...] OR {var} OR %s
-            # Note: We explicitly look for [ followed by NOT / to capture openers only
-            # But regex logic is easier if we catch all and filter below.
             "Gomo []": r"(\[[^\]/]+\]|{[^}]+}|%[sd])" 
         }
-        
         pattern = patterns.get(syntax_mode, patterns["Standard XML <>"])
-        
         raw_matches = re.findall(pattern, text)
         unique_openers = []
         seen = set()
-
         for tag in raw_matches:
-            # Filter out closing tags just in case regex caught them or user wants pure list
-            # XML closing: </...
-            # Gomo closing: [/...
-            if tag.startswith("</") or tag.startswith("[/"):
-                continue
-                
+            if tag.startswith("</") or tag.startswith("[/"): continue
             if tag not in seen:
-                seen.add(tag)
-                unique_openers.append(tag)
-        
+                seen.add(tag); unique_openers.append(tag)
         return unique_openers
