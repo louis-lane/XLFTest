@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
+# --- CRITICAL IMPORT: Rename standard ttk so we can use its PanedWindow ---
 from tkinter import ttk as tk_ttk 
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
@@ -18,7 +19,7 @@ class EditorTab(ttk.Frame):
         self.current_file = None
         self.file_map = {} 
         
-        # --- MAIN LAYOUT ---
+        # --- MAIN LAYOUT: 3 PANES (Sidebar | Grid | Editor) ---
         self.main_split = tk_ttk.PanedWindow(self, orient=HORIZONTAL)
         self.main_split.pack(fill=BOTH, expand=True, padx=5, pady=5)
 
@@ -32,8 +33,10 @@ class EditorTab(ttk.Frame):
 
         self.file_tree = ttk.Treeview(self.sidebar_frame, show="tree headings", selectmode="browse")
         self.file_tree.heading("#0", text="Project Files")
+        
         sb_scroll = ttk.Scrollbar(self.sidebar_frame, orient=VERTICAL, command=self.file_tree.yview)
         self.file_tree.configure(yscroll=sb_scroll.set)
+        
         sb_scroll.pack(side=RIGHT, fill=Y)
         self.file_tree.pack(side=LEFT, fill=BOTH, expand=True)
         self.file_tree.bind("<<TreeviewSelect>>", self.on_file_select)
@@ -70,56 +73,77 @@ class EditorTab(ttk.Frame):
         
         cols = ("id", "status", "source", "target")
         self.tree = ttk.Treeview(self.grid_frame, columns=cols, show="headings", selectmode="extended") 
-        self.tree.heading("id", text="ID"); self.tree.column("id", width=60, stretch=False)
-        self.tree.heading("status", text="Status"); self.tree.column("status", width=100, stretch=False)
-        self.tree.heading("source", text="Original Source"); self.tree.column("source", width=300)
-        self.tree.heading("target", text="Translated Target"); self.tree.column("target", width=300)
+        
+        self.tree.heading("id", text="ID")
+        self.tree.heading("status", text="Status")
+        self.tree.heading("source", text="Original Source")
+        self.tree.heading("target", text="Translated Target")
+        
+        self.tree.column("id", width=60, stretch=False)
+        self.tree.column("status", width=100, stretch=False)
+        self.tree.column("source", width=300)
+        self.tree.column("target", width=300)
         
         grid_scroll = ttk.Scrollbar(self.grid_frame, orient=VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=grid_scroll.set)
         grid_scroll.pack(side=RIGHT, fill=Y)
         self.tree.pack(fill=BOTH, expand=True)
+        
         self.tree.bind("<<TreeviewSelect>>", self.on_row_select)
         
+        # Context Menus
         self.create_context_menus()
         self.tree.bind("<Button-3>", self.show_grid_menu)
         self.tree.bind("<Button-2>", self.show_grid_menu) 
 
-        # Edit Panel Pane
+        # --- EDIT PANEL (With Scrollbars) ---
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=1)
         
-        ttk.Label(self.edit_panel, text="Original Source:", font=("Helvetica", 9, "bold")).pack(anchor=W)
-        self.txt_source = tk.Text(self.edit_panel, height=3, bg="white", fg="black", state=DISABLED)
-        self.txt_source.pack(fill=X, pady=(0, 5))
-        self.txt_source.bind("<Button-3>", self.show_source_menu)
-        
-        ttk.Label(self.edit_panel, text="Translation Target:", font=("Helvetica", 9, "bold")).pack(anchor=W)
-        self.txt_target = tk.Text(self.edit_panel, height=3, bg="white", fg="black", insertbackground="black")
-        self.txt_target.pack(fill=X, pady=(0, 5))
-        self.txt_target.bind("<Button-3>", self.show_target_menu)
-        
-        # --- BOTTOM CONTROLS ---
+        # 1. Pack Controls at BOTTOM (So they stay visible)
         controls_bot = ttk.Frame(self.edit_panel)
-        controls_bot.pack(fill=X, pady=5)
+        controls_bot.pack(side=BOTTOM, fill=X, pady=5)
 
-        # Status
         ttk.Label(controls_bot, text="Status:").pack(side=LEFT, padx=(0, 5))
         self.edit_status_var = tk.StringVar()
         self.status_dropdown = ttk.Combobox(controls_bot, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
         self.status_dropdown.pack(side=LEFT)
 
-        # Navigation & Save Buttons
         btn_nav_frame = ttk.Frame(controls_bot)
         btn_nav_frame.pack(side=RIGHT)
-
         ttk.Button(btn_nav_frame, text="Previous", command=lambda: self.navigate_grid(-1), bootstyle="secondary-outline").pack(side=LEFT, padx=(0, 5))
         ttk.Button(btn_nav_frame, text="Next", command=lambda: self.navigate_grid(1), bootstyle="secondary-outline").pack(side=LEFT, padx=(0, 5))
         ttk.Button(btn_nav_frame, text="Save & Next", command=self.save_and_next, bootstyle="success").pack(side=LEFT)
+        ttk.Label(self.edit_panel, text="[Ctrl+Enter: Save & Next]", font=("Helvetica", 8), foreground="gray").pack(side=BOTTOM, anchor=E)
 
-        # Hotkey Info Label
-        ttk.Label(self.edit_panel, text="[Ctrl+Enter: Save & Next]  [Ctrl+Up/Down: Navigate]  [Alt+S: Copy Source]", font=("Helvetica", 8), foreground="gray").pack(anchor=E)
-
+        # 2. Pack Text Areas in remaining space (Expandable)
+        
+        # Source Text Area
+        ttk.Label(self.edit_panel, text="Original Source:", font=("Helvetica", 9, "bold")).pack(anchor=W)
+        src_frame = ttk.Frame(self.edit_panel)
+        src_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
+        
+        src_scroll = ttk.Scrollbar(src_frame, orient=VERTICAL)
+        self.txt_source = tk.Text(src_frame, height=4, bg="white", fg="black", state=DISABLED, wrap="word", yscrollcommand=src_scroll.set)
+        src_scroll.config(command=self.txt_source.yview)
+        
+        src_scroll.pack(side=RIGHT, fill=Y)
+        self.txt_source.pack(side=LEFT, fill=BOTH, expand=True)
+        self.txt_source.bind("<Button-3>", self.show_source_menu)
+        
+        # Target Text Area
+        ttk.Label(self.edit_panel, text="Translation Target:", font=("Helvetica", 9, "bold")).pack(anchor=W)
+        tgt_frame = ttk.Frame(self.edit_panel)
+        tgt_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
+        
+        tgt_scroll = ttk.Scrollbar(tgt_frame, orient=VERTICAL)
+        self.txt_target = tk.Text(tgt_frame, height=4, bg="white", fg="black", insertbackground="black", wrap="word", yscrollcommand=tgt_scroll.set)
+        tgt_scroll.config(command=self.txt_target.yview)
+        
+        tgt_scroll.pack(side=RIGHT, fill=Y)
+        self.txt_target.pack(side=LEFT, fill=BOTH, expand=True)
+        self.txt_target.bind("<Button-3>", self.show_target_menu)
+        
         # Setup State & Keys
         self.xml_tree = None
         self.namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
@@ -129,23 +153,18 @@ class EditorTab(ttk.Frame):
 
     # --- HOTKEYS ---
     def setup_hotkeys(self):
-        # Bind to the target text box so they work while typing
         self.txt_target.bind("<Control-Return>", lambda e: self.save_and_next())
         self.txt_target.bind("<Control-Up>", lambda e: self.navigate_grid(-1))
         self.txt_target.bind("<Control-Down>", lambda e: self.navigate_grid(1))
         self.txt_target.bind("<Alt-s>", lambda e: self.replace_edit_with_source())
         self.txt_target.bind("<Alt-c>", lambda e: self.copy_source_to_clipboard())
-
-        # Also bind to the Treeview for navigation
         self.tree.bind("<Control-Up>", lambda e: self.navigate_grid(-1))
         self.tree.bind("<Control-Down>", lambda e: self.navigate_grid(1))
 
     # --- NAVIGATION LOGIC ---
     def navigate_grid(self, direction):
-        # direction: -1 (prev) or 1 (next)
         current_selection = self.tree.selection()
         all_items = self.tree.get_children()
-        
         if not all_items: return
         
         if not current_selection:
@@ -155,17 +174,15 @@ class EditorTab(ttk.Frame):
             try:
                 current_index = all_items.index(current_id)
                 new_index = current_index + direction
-            except ValueError:
-                new_index = 0
+            except ValueError: new_index = 0
         
-        # Bounds check
         if 0 <= new_index < len(all_items):
             new_item = all_items[new_index]
             self.tree.selection_set(new_item)
             self.tree.see(new_item)
             self.on_row_select(None)
-            self.txt_target.focus_set() # Keep focus in edit box
-            return "break" # Prevent default behavior
+            self.txt_target.focus_set()
+            return "break"
 
     def save_and_next(self):
         self.save_segment()
@@ -260,7 +277,6 @@ class EditorTab(ttk.Frame):
         try:
             self.xml_tree.write(self.current_file, encoding="UTF-8", xml_declaration=True, pretty_print=True)
             self.apply_filter()
-            # Restore Selection
             for child in self.tree.get_children():
                 if str(self.tree.item(child, 'values')[0]) == str(self.current_edit_id):
                     self.tree.selection_set(child); self.tree.see(child); break
@@ -340,175 +356,4 @@ class EditorTab(ttk.Frame):
     def bulk_update_text(self, new_text):
         selected_items = self.tree.selection()
         if not selected_items: return
-        for item_id in selected_items:
-            uid = self.tree.item(item_id, 'values')[0]
-            rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
-            if rec: self._update_single_record(rec, new_text, "translated")
-        self._save_and_refresh()
-
-    def bulk_set_status(self, new_status):
-        selected_items = self.tree.selection()
-        if not selected_items: return
-        for item_id in selected_items:
-            uid = self.tree.item(item_id, 'values')[0]
-            rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
-            if rec: self._update_single_record(rec, rec['target'], new_status)
-        self._save_and_refresh()
-
-    def _update_single_record(self, rec, text, status):
-        rec['target'] = text; rec['status'] = status
-        tgt_node = rec['node'].find('xliff:target', namespaces=self.namespaces)
-        if tgt_node is None: tgt_node = etree.SubElement(rec['node'], f"{{{self.namespaces['xliff']}}}target")
-        tgt_node.text = text; tgt_node.set('state', status)
-
-    def _save_and_refresh(self):
-        try:
-            self.xml_tree.write(self.current_file, encoding="UTF-8", xml_declaration=True, pretty_print=True)
-            current_selection = self.tree.selection()
-            self.apply_filter()
-            valid_selection = [item for item in current_selection if self.tree.exists(item)]
-            if valid_selection: self.tree.selection_set(valid_selection); self.on_row_select(None)
-        except Exception as e: messagebox.showerror("Error", f"Failed to save: {e}")
-
-    def jump_to_id(self, target_id):
-        self.tree.selection_remove(self.tree.selection())
-        for child in self.tree.get_children():
-            item_id = self.tree.item(child, 'values')[0]
-            if str(item_id) == str(target_id):
-                self.tree.selection_set(child); self.tree.focus(child); self.tree.see(child); self.on_row_select(None); return
-
-    # --- FIND DIALOG (Compact Logic for Brevity) ---
-    def open_find_replace_dialog(self):
-        if not self.current_folder: messagebox.showwarning("Warning", "Please open a project folder first."); return
-        dialog = ttk.Toplevel(self); dialog.title("Find & Replace"); dialog.geometry("700x800")
-        
-        input_frame = ttk.Frame(dialog, padding=10); input_frame.pack(fill=X)
-        ttk.Label(input_frame, text="Find what:").pack(anchor=W); entry_find = ttk.Entry(input_frame); entry_find.pack(fill=X, pady=(0, 10))
-        ttk.Label(input_frame, text="Replace with:").pack(anchor=W); entry_replace = ttk.Entry(input_frame); entry_replace.pack(fill=X, pady=(0, 10))
-        
-        mid_frame = ttk.Frame(dialog, padding=10); mid_frame.pack(fill=X)
-        options_frame = ttk.Labelframe(mid_frame, text="Options", padding=10); options_frame.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 5))
-        match_case_var = tk.BooleanVar(value=False); ttk.Checkbutton(options_frame, text="Match Case", variable=match_case_var).pack(anchor=W)
-        exact_match_var = tk.BooleanVar(value=False); ttk.Checkbutton(options_frame, text="Match Whole Content", variable=exact_match_var).pack(anchor=W)
-        regex_var = tk.BooleanVar(value=False); ttk.Checkbutton(options_frame, text="Use Regex", variable=regex_var).pack(anchor=W)
-        backup_var = tk.BooleanVar(value=True); ttk.Checkbutton(options_frame, text="Create Backups", variable=backup_var).pack(anchor=W)
-
-        scope_frame = ttk.Labelframe(mid_frame, text="Scope", padding=10); scope_frame.pack(side=RIGHT, fill=BOTH, expand=True, padx=(5, 0))
-        scope_var = tk.StringVar(value="current_file"); current_lang = "Unknown"
-        if self.current_file: current_lang = get_target_language(self.current_file)
-        ttk.Radiobutton(scope_frame, text="Current File", variable=scope_var, value="current_file").pack(anchor=W)
-        rb_lang = ttk.Radiobutton(scope_frame, text=f"All '{current_lang}' Files", variable=scope_var, value="current_lang")
-        rb_lang.pack(anchor=W)
-        if not self.current_file: rb_lang.config(state=DISABLED)
-        ttk.Radiobutton(scope_frame, text="Entire Project", variable=scope_var, value="all_files").pack(anchor=W)
-
-        btn_frame = ttk.Frame(dialog, padding=10); btn_frame.pack(fill=X)
-        progress = ttk.Progressbar(dialog, mode='determinate', bootstyle="success-striped")
-        
-        results_frame = ttk.Labelframe(dialog, text="Search Results", padding=10); results_frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
-        res_cols = ("file", "id", "context"); results_tree = ttk.Treeview(results_frame, columns=res_cols, show="headings", selectmode="browse")
-        results_tree.heading("file", text="File"); results_tree.column("file", width=150)
-        results_tree.heading("id", text="ID"); results_tree.column("id", width=60)
-        results_tree.heading("context", text="Matched Text"); results_tree.column("context", width=300)
-        res_scroll = ttk.Scrollbar(results_frame, orient=VERTICAL, command=results_tree.yview)
-        results_tree.configure(yscroll=res_scroll.set); res_scroll.pack(side=RIGHT, fill=Y); results_tree.pack(fill=BOTH, expand=True)
-
-        def on_result_double_click(event):
-            sel = results_tree.selection()
-            if not sel: return
-            item = results_tree.item(sel[0]); full_path = item['tags'][0]; target_id = item['values'][1]
-            if str(self.current_file) != str(full_path): self.load_file(full_path)
-            self.jump_to_id(target_id)
-        results_tree.bind("<Double-1>", on_result_double_click)
-
-        def get_file_list():
-            scope = scope_var.get(); files_to_process = []
-            if scope == "current_file": 
-                if self.current_file: files_to_process = [Path(self.current_file)]
-            elif scope == "current_lang": 
-                if current_lang in self.file_map: files_to_process = self.file_map[current_lang]
-            elif scope == "all_files": 
-                for file_list in self.file_map.values(): files_to_process.extend(file_list)
-            return files_to_process
-
-        def run_processing(mode="find"):
-            find_text = entry_find.get(); replace_text = entry_replace.get()
-            match_case = match_case_var.get(); use_regex = regex_var.get(); make_backup = backup_var.get(); exact_match = exact_match_var.get()
-            
-            if mode != "rollback" and not find_text: return
-            files_to_process = get_file_list()
-            if not files_to_process: messagebox.showinfo("Info", "No files selected."); return
-
-            for i in results_tree.get_children(): results_tree.delete(i)
-            progress.pack(fill=X, padx=10, pady=(0, 10))
-
-            pattern = None
-            if mode != "rollback" and use_regex:
-                try: flags = 0 if match_case else re.IGNORECASE; pattern = re.compile(find_text, flags)
-                except re.error as e: messagebox.showerror("Regex Error", f"Invalid Pattern: {e}"); return
-
-            total_hits = 0; files_mod = 0; process_errors = []
-            progress['maximum'] = len(files_to_process); progress['value'] = 0
-
-            if mode == "rollback":
-                restored_count = 0
-                for idx, file_path in enumerate(files_to_process):
-                    bak_path = Path(str(file_path) + ".bak")
-                    if bak_path.exists():
-                        try: shutil.copy2(bak_path, file_path); restored_count += 1
-                        except Exception as e: process_errors.append(f"Failed to restore {file_path.name}: {e}")
-                    progress['value'] = idx + 1; dialog.update_idletasks()
-                if process_errors: log_errors(self.current_folder, process_errors); messagebox.showwarning("Warnings", f"Restored {restored_count} files.\nErrors in log.")
-                else: messagebox.showinfo("Rollback", f"Restored {restored_count} files.")
-                if self.current_file: self.load_file(self.current_file)
-                progress.pack_forget(); return
-
-            for idx, file_path in enumerate(files_to_process):
-                try:
-                    tree = etree.parse(str(file_path)); file_dirty = False
-                    for tu in tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
-                        tgt_node = tu.find('xliff:target', namespaces=self.namespaces)
-                        if tgt_node is not None and tgt_node.text:
-                            orig = tgt_node.text; new_txt = orig; found = False
-                            if use_regex:
-                                if pattern.search(orig): found = True; new_txt = pattern.sub(replace_text, orig) if mode == "replace" else orig
-                            elif exact_match:
-                                if match_case: found = (orig == find_text); new_txt = replace_text if found and mode == "replace" else orig
-                                else: found = (orig.lower() == find_text.lower()); new_txt = replace_text if found and mode == "replace" else orig
-                            else:
-                                if match_case: found = (find_text in orig); new_txt = orig.replace(find_text, replace_text) if found and mode == "replace" else orig
-                                else: 
-                                    found = (find_text.lower() in orig.lower())
-                                    if found and mode == "replace": new_txt = re.compile(re.escape(find_text), re.IGNORECASE).sub(replace_text, orig)
-
-                            if found:
-                                total_hits += 1
-                                if mode == "find": results_tree.insert("", "end", values=(file_path.name, tu.get('id'), orig.replace('\n', ' ')[:50]), tags=(str(file_path),))
-                                if mode == "replace" and new_txt != orig: tgt_node.text = new_txt; tgt_node.set('state', 'translated'); file_dirty = True
-
-                    if file_dirty and mode == "replace":
-                        files_mod += 1; 
-                        if make_backup: shutil.copy2(file_path, str(file_path) + ".bak")
-                        tree.write(str(file_path), encoding="UTF-8", xml_declaration=True, pretty_print=True)
-                except Exception as e: process_errors.append(f"Error {file_path.name}: {e}")
-                progress['value'] = idx + 1; dialog.update_idletasks()
-
-            progress.pack_forget()
-            if process_errors: log_errors(self.current_folder, process_errors); err_msg = "\n(Errors in log)"
-            else: err_msg = ""
-
-            if mode == "replace":
-                messagebox.showinfo("Complete", f"Replaced {total_hits} occurrences.\nModified {files_mod} files.{err_msg}")
-                if self.current_file: self.load_file(self.current_file)
-            elif mode == "find":
-                if total_hits == 0: messagebox.showinfo("Result", f"No matches found.{err_msg}")
-                elif err_msg: messagebox.showwarning("Warning", f"Found {total_hits} matches.{err_msg}")
-
-        def thread_find(): threading.Thread(target=lambda: run_processing("find")).start()
-        def thread_replace(): threading.Thread(target=lambda: run_processing("replace")).start()
-        def thread_rollback(): threading.Thread(target=lambda: run_processing("rollback")).start()
-
-        ttk.Button(btn_frame, text="Find All", command=thread_find, bootstyle="info-outline").pack(side=LEFT, padx=5)
-        ttk.Button(btn_frame, text="Replace All", command=thread_replace, bootstyle="danger").pack(side=LEFT, padx=5)
-        ttk.Button(btn_frame, text="Close", command=dialog.destroy, bootstyle="secondary").pack(side=RIGHT)
-        ttk.Button(btn_frame, text="Restore Backups", command=thread_rollback, bootstyle="warning-outline").pack(side=RIGHT, padx=20)
+        for item
