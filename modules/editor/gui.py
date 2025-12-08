@@ -221,6 +221,16 @@ class EditorTab(ttk.Frame):
     def open_find_replace_dialog(self):
         if not self.find_visible: self.toggle_find_replace()
 
+    # --- POPUP LOGIC ---
+    def open_add_term_dialog(self):
+        # Initializes the AddTermDialog with self as parent and the logic engine
+        AddTermDialog(self, self.logic)
+        
+        # After dialog closes, refresh glossary if a segment is selected
+        if self.current_edit_id:
+            rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+            if rec: self.refresh_glossary_view(rec['source'])
+
     # --- TAG LOGIC ---
     def on_syntax_change(self, event):
         if self.current_edit_id:
@@ -353,8 +363,8 @@ class EditorTab(ttk.Frame):
         self.txt_target.insert(tk.INSERT, translation)
 
     def save_and_next(self):
-        # NOTE: logic.save_segment or similar needs to be called here.
-        # Assuming you will implement save_segment or it's handled in logic.py
+        # NOTE: This ensures you don't crash if you click the Save button.
+        # You will need to implement the actual saving logic here later.
         pass 
 
     def navigate_grid(self, direction):
@@ -373,7 +383,6 @@ class EditorTab(ttk.Frame):
         
     def toggle_admin_mode(self, event=None):
         self.admin_mode_active = not self.admin_mode_active
-        # Add visual feedback or logic for admin mode here if needed
         print(f"Admin mode: {self.admin_mode_active}")
 
     def create_context_menus(self):
@@ -400,7 +409,7 @@ class EditorTab(ttk.Frame):
         try: w.insert(tk.INSERT, self.clipboard_get())
         except: pass
     
-    # --- RE-ADDED MISSING FILTER FUNCTION ---
+    # --- FILTER FUNCTION ---
     def apply_filter(self, event=None):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
