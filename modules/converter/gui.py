@@ -2,19 +2,11 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-import pandas as pd
-from lxml import etree
 from pathlib import Path
-import re
-from openpyxl.styles import PatternFill
-from datetime import datetime
-import os
-import zlib
-import base64
 import threading
-# --- IMPORT center_window ---
-from utils.shared import get_target_language, log_errors, compress_ids, decompress_ids, center_window, CONFIG
-from utils.shared import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
+from utils.shared import center_window
+# --- NEW IMPORTS FROM LOGIC FILE ---
+from modules.converter.logic import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
 
 class ConverterTab(ttk.Frame):
     def __init__(self, parent):
@@ -91,12 +83,9 @@ class ConverterTab(ttk.Frame):
             try:
                 updated, total, errors = apply_deepl_translations(Path(root_dir))
                 msg = f"Updated {updated}/{total} files."
-                if errors: 
-                    log_errors(Path(root_dir), errors)
-                    msg += " Check logs."
+                if errors: msg += " Check error_log.txt."
                 messagebox.showinfo("Result", msg)
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
     def run_export(self):
@@ -106,8 +95,7 @@ class ConverterTab(ttk.Frame):
             try:
                 fc, lc, ec = export_to_excel_with_glossary(Path(root_dir), self.glossary_path)
                 messagebox.showinfo("Result", f"Processed {fc} files ({lc} langs). Errors: {ec}")
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
     def run_import(self):
@@ -117,8 +105,7 @@ class ConverterTab(ttk.Frame):
             try:
                 pc, ec = import_and_reconstruct_with_glossary(Path(root_dir), self.glossary_path)
                 messagebox.showinfo("Result", f"Reconstructed {pc} files. Errors: {ec}")
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
     def run_analysis(self):
@@ -128,15 +115,12 @@ class ConverterTab(ttk.Frame):
             try:
                 data = perform_analysis(Path(root_dir), self.glossary_path)
                 self.after(0, lambda: self.display_analysis_report(data))
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
     def display_analysis_report(self, data):
         report_window = ttk.Toplevel(self)
         report_window.title("Translation Analysis Report")
-        
-        # --- USE SHARED CENTER FUNCTION ---
         center_window(report_window, 800, 500, self) 
         
         top_frame = ttk.Frame(report_window, padding=10)
@@ -154,8 +138,7 @@ class ConverterTab(ttk.Frame):
         for lang, metrics in data.items():
             row = (lang, metrics['Total Words'], metrics['Repetitions'], metrics['Glossary Matches'], metrics['New Words'])
             tree.insert("", "end", values=row)
-            for key in totals:
-                totals[key] += metrics.get(key, 0)
+            for key in totals: totals[key] += metrics.get(key, 0)
         
         tree.insert("", "end", values=())
         total_row = ('TOTAL', totals['Total Words'], totals['Repetitions'], totals['Glossary Matches'], totals['New Words'])
@@ -177,11 +160,9 @@ class ConverterTab(ttk.Frame):
                 for lang, metrics in data.items():
                     row_values = [lang, metrics.get('Total Words', 0), metrics.get('Repetitions', 0), metrics.get('Glossary Matches', 0), metrics.get('New Words', 0)]
                     f.write("".join(str(v).ljust(w) for v, w in zip(row_values, widths)) + "\n")
-                    for i, key in enumerate(totals):
-                        totals[key] += row_values[i+1]
+                    for i, key in enumerate(totals): totals[key] += row_values[i+1]
                 f.write(f"{'-' * sum(widths)}\n")
                 total_values = ['TOTAL', totals['Total Words'], totals['Repetitions'], totals['Glossary Matches'], totals['New Words']]
                 f.write("".join(str(v).ljust(w) for v, w in zip(total_values, widths)) + "\n")
             messagebox.showinfo("Success", f"Report successfully saved to:\n{filepath}")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Could not save the report: {e}")
+        except Exception as e: messagebox.showerror("Export Error", f"Could not save the report: {e}")
