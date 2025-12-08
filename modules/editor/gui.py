@@ -37,7 +37,7 @@ class EditorTab(ttk.Frame):
         self.setup_hotkeys()
         self.logic.load_glossary()
 
-        # Apply initial layout based on flags above
+        # Apply initial layout
         self.update_sidebar_visibility()
 
     def setup_ui(self):
@@ -205,14 +205,8 @@ class EditorTab(ttk.Frame):
             except: pass
         else:
             # Show the panel if it's hidden but needs to be visible
-            is_managed = False
-            try:
-                self.main_split.index(self.right_sidebar)
-                is_managed = True
-            except tk.TclError:
-                is_managed = False
-            
-            if not is_managed:
+            # FIXED: Used 'panes()' to check existence instead of 'index()' which crashes
+            if str(self.right_sidebar) not in self.main_split.panes():
                 self.main_split.add(self.right_sidebar, weight=1)
 
         # 2. Manage the Panes inside (Glossary vs Find)
@@ -252,7 +246,7 @@ class EditorTab(ttk.Frame):
     def open_find_replace_dialog(self):
         if not self.find_visible: self.toggle_find_replace()
 
-    # --- POPUP LOGIC ---
+    # --- POPUP LOGIC (ADDED MISSING METHOD) ---
     def open_add_term_dialog(self):
         # Initializes the AddTermDialog with self as parent and the logic engine
         AddTermDialog(self, self.logic)
