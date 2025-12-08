@@ -155,6 +155,7 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl_frame.pack(side=BOTTOM, fill=X, pady=5)
         ttk.Label(self.gloss_ctrl_frame, text="Double-click to insert", font=("Helvetica", 7), foreground="gray").pack(side=LEFT)
         
+        # --- ADMIN BUTTON (Hidden by Default) ---
         self.btn_add_term = ttk.Button(self.gloss_ctrl_frame, text="+ Add Term", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
         self.xml_tree = None
@@ -175,7 +176,7 @@ class EditorTab(ttk.Frame):
         
         self.admin_mode_active = not self.admin_mode_active
 
-    # --- GLOSSARY EDITOR (UPDATED WITH NEW COLUMNS) ---
+    # --- GLOSSARY EDITOR LOGIC ---
     def open_add_term_dialog(self):
         d = ttk.Toplevel(self)
         d.title("Add Glossary Term")
@@ -188,7 +189,6 @@ class EditorTab(ttk.Frame):
         try: initial_source = self.txt_source.get("sel.first", "sel.last")
         except: pass
 
-        # --- Basic Fields ---
         ttk.Label(main_frame, text="Source Term:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
         e_src = ttk.Entry(main_frame, width=40)
         e_src.pack(fill=X, pady=(0, 15))
@@ -198,18 +198,34 @@ class EditorTab(ttk.Frame):
         e_tgt = ttk.Entry(main_frame, width=40)
         e_tgt.pack(fill=X, pady=(0, 15))
         
+        # --- SEARCHABLE LANGUAGE DROPDOWN ---
         ttk.Label(main_frame, text="Language Code:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
+        
+        # 1. Get List and Default
+        all_langs = CONFIG.get("protected_languages", [])
         default_lang = ""
         if self.current_file: default_lang = get_target_language(self.current_file)
-        c_lang = ttk.Combobox(main_frame, values=CONFIG.get("protected_languages", []), width=38)
+        
+        # 2. Create Combobox
+        c_lang = ttk.Combobox(main_frame, values=all_langs, width=38)
         c_lang.pack(fill=X, pady=(0, 15))
         c_lang.set(default_lang)
 
-        # --- Advanced Options Frame ---
+        # 3. Add Autocomplete/Filter Logic
+        def filter_lang_options(event):
+            typed = c_lang.get()
+            if typed == '':
+                c_lang['values'] = all_langs
+            else:
+                # Filter list case-insensitive
+                filtered = [x for x in all_langs if typed.lower() in x.lower()]
+                c_lang['values'] = filtered
+                
+        c_lang.bind('<KeyRelease>', filter_lang_options)
+
         adv_frame = ttk.Labelframe(main_frame, text="Advanced Settings", padding=10, bootstyle="secondary")
         adv_frame.pack(fill=X, pady=(5, 10))
 
-        # Row 1: Match Type & Context
         r1 = ttk.Frame(adv_frame)
         r1.pack(fill=X, pady=5)
         
@@ -222,7 +238,6 @@ class EditorTab(ttk.Frame):
         e_context = ttk.Entry(r1, width=15)
         e_context.pack(side=LEFT, padx=5, fill=X, expand=True)
 
-        # Row 2: Checkboxes
         r2 = ttk.Frame(adv_frame)
         r2.pack(fill=X, pady=5)
         
@@ -232,7 +247,6 @@ class EditorTab(ttk.Frame):
         forbidden_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(r2, text="Mark as Forbidden", variable=forbidden_var).pack(side=LEFT)
 
-        # Focus Logic
         if initial_source: e_tgt.focus_set() 
         else: e_src.focus_set()
 
@@ -245,7 +259,6 @@ class EditorTab(ttk.Frame):
                     if not messagebox.askyesno("Duplicate", "Term exists. Add duplicate?"): return
             
             g_path = Path("glossary.xlsx")
-            # Build new row with extra columns
             new_row = {
                 "source_text": s, 
                 "target_text": t, 
@@ -258,7 +271,7 @@ class EditorTab(ttk.Frame):
             
             try:
                 if g_path.exists():
-                    df = pd.read_excel(g_path)
+                    df = pd.read_excel(g_path).fillna("")
                     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 else:
                     df = pd.DataFrame([new_row])
@@ -289,20 +302,19 @@ class EditorTab(ttk.Frame):
         else: self.main_split.add(self.right_sidebar, weight=1); self.btn_toggle_glossary.configure(bootstyle="info-outline")
         self.glossary_visible = not self.glossary_visible
 
-    # --- GLOSSARY LOGIC (UPDATED READ) ---
+    # --- GLOSSARY LOGIC ---
     def load_glossary_data(self):
         g_path = Path("glossary.xlsx")
         if not g_path.exists(): return
         try:
-            df = pd.read_excel(g_path)
+            df = pd.read_excel(g_path).fillna("")
             self.glossary_data = [] 
             for _, row in df.iterrows():
-                if pd.notna(row.get('source_text')) and pd.notna(row.get('target_text')):
+                if str(row.get('source_text', '')).strip() and str(row.get('target_text', '')).strip():
                     self.glossary_data.append({
                         "source": str(row['source_text']).strip(),
                         "target": str(row['target_text']).strip(),
                         "lang": str(row.get('language_code', '')).strip(),
-                        # Read new columns safely
                         "match_type": str(row.get('match_type', 'partial')).strip(),
                         "case_sensitive": str(row.get('case_sensitive', 'FALSE')).strip().upper() == 'TRUE',
                         "context": str(row.get('context', '')).strip(),
@@ -318,16 +330,13 @@ class EditorTab(ttk.Frame):
         source_lower = source_text.lower()
         
         for entry in self.glossary_data:
-            # Skip Forbidden (for now, or highlight differently later)
             if entry['is_forbidden']: continue 
-
             if entry['lang'] and current_lang != "unknown":
                 if not current_lang.lower().startswith(entry['lang'].lower()): continue
             
             term = entry['source']
             match = False
             
-            # Use new match types
             if entry['match_type'] == 'exact':
                 if entry['case_sensitive']: match = (term == source_text)
                 else: match = (term.lower() == source_lower)
@@ -336,21 +345,17 @@ class EditorTab(ttk.Frame):
                     flags = 0 if entry['case_sensitive'] else re.IGNORECASE
                     if re.search(term, source_text, flags): match = True
                 except: pass
-            else: # partial (default)
+            else: 
                 if entry['case_sensitive']: match = (term in source_text)
                 else: match = (term.lower() in source_lower)
 
             if match: 
-                # Add context to display if available
-                display_term = term
-                if entry['context']: display_term += f" ({entry['context']})"
-                self.gloss_tree.insert("", "end", values=(display_term, entry['target']))
+                self.gloss_tree.insert("", "end", values=(term, entry['target']))
 
     def insert_glossary_term(self, event):
         sel = self.gloss_tree.selection()
         if not sel: return
         translation = self.gloss_tree.item(sel[0], 'values')[1]
-        
         self.txt_target.focus_set()
         try: self.txt_target.delete("sel.first", "sel.last")
         except: pass
@@ -372,17 +377,45 @@ class EditorTab(ttk.Frame):
         current_selection = self.tree.selection()
         all_items = self.tree.get_children()
         if not all_items: return
-        if not current_selection: new_index = 0
+        
+        if not current_selection:
+            new_index = 0
         else:
             try: new_index = all_items.index(current_selection[0]) + direction
             except ValueError: new_index = 0
+        
         if 0 <= new_index < len(all_items):
             new_item = all_items[new_index]
-            self.tree.selection_set(new_item); self.tree.see(new_item)
-            self.on_row_select(None); self.txt_target.focus_set()
+            self.tree.selection_set(new_item)
+            self.tree.see(new_item)
+            self.on_row_select(None)
+            self.txt_target.focus_set()
             return "break"
 
-    def save_and_next(self): self.save_segment(); self.navigate_grid(1); return "break"
+    def save_and_next(self):
+        next_id_to_select = None
+        current_sel = self.tree.selection()
+        if current_sel:
+            all_items = self.tree.get_children()
+            try:
+                curr_idx = all_items.index(current_sel[0])
+                if curr_idx + 1 < len(all_items):
+                    next_iid = all_items[curr_idx + 1]
+                    next_id_to_select = self.tree.item(next_iid, 'values')[0]
+            except ValueError: pass
+
+        self.save_segment() 
+        
+        if next_id_to_select:
+            for child in self.tree.get_children():
+                if str(self.tree.item(child, 'values')[0]) == str(next_id_to_select):
+                    self.tree.selection_set(child)
+                    self.tree.see(child)
+                    self.on_row_select(None)
+                    self.txt_target.focus_set()
+                    break
+        return "break"
+
     def copy_source_to_clipboard(self): src = self.txt_source.get("1.0", "end-1c"); self.clipboard_clear(); self.clipboard_append(src); return "break"
 
     # --- FILE LOADING ---
