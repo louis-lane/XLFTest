@@ -5,7 +5,7 @@ from ttkbootstrap.constants import *
 from pathlib import Path
 import threading
 from utils.shared import center_window
-# --- NEW IMPORTS FROM LOGIC FILE ---
+# --- FIX: Import from new logic file ---
 from modules.converter.logic import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
 
 class ConverterTab(ttk.Frame):
@@ -16,7 +16,6 @@ class ConverterTab(ttk.Frame):
         self.auto_load_glossary()
 
     def build_ui(self):
-        # 1. Analysis
         lc = ttk.Labelframe(self, text="1. Analysis & Setup", padding=10, bootstyle="info")
         lc.pack(fill=X, pady=5)
         
@@ -29,18 +28,15 @@ class ConverterTab(ttk.Frame):
         ttk.Separator(lc, orient=HORIZONTAL).pack(fill=X, pady=10)
         ttk.Button(lc, text="Analyze Project Statistics", command=lambda: self.start_thread(self.run_analysis), bootstyle="info").pack(fill=X)
 
-        # 2. Export
         l1 = ttk.Labelframe(self, text="2. Export for Translation", padding=10, bootstyle="primary")
         l1.pack(fill=X, pady=10)
         ttk.Button(l1, text="Create Excel Masters (Step 1)", command=lambda: self.start_thread(self.run_export), bootstyle="primary").pack(fill=X, pady=2)
         ttk.Button(l1, text="Apply DeepL Translations (Step 1.5)", command=lambda: self.start_thread(self.run_apply_deepl), bootstyle="primary-outline").pack(fill=X, pady=2)
 
-        # 3. Import
         l2 = ttk.Labelframe(self, text="3. Import & Reconstruct", padding=10, bootstyle="success")
         l2.pack(fill=X, pady=5)
         ttk.Button(l2, text="Reconstruct XLIFFs (Step 2)", command=lambda: self.start_thread(self.run_import), bootstyle="success").pack(fill=X)
 
-        # Status Bar
         self.status_frame = ttk.Frame(self)
         self.status_frame.pack(side=BOTTOM, fill=X, pady=10)
         self.progress = ttk.Progressbar(self.status_frame, mode='indeterminate', bootstyle="success-striped")
