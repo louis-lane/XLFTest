@@ -389,6 +389,35 @@ class EditorTab(ttk.Frame):
             self.segment_dirty = False # Reset dirty flag on load
         except Exception as e: messagebox.showerror("Error", str(e))
     
+    def request_file_switch(self, target_path):
+        """
+        Called by external panes (e.g., FindReplacePane) to safely switch files.
+        Checks for unsaved changes, loads the file, and syncs the visual tree.
+        """
+        # 1. Safety Check
+        if not self.check_unsaved_changes():
+            return False
+        
+        # 2. Load File
+        self.load_file(target_path)
+        
+        # 3. Sync Visual Tree Selection
+        self.select_file_in_tree(target_path)
+        return True
+
+    def select_file_in_tree(self, file_path):
+        """Visually selects the specified file in the sidebar tree."""
+        target_str = str(file_path)
+        # Iterate over language nodes
+        for lang_node in self.file_tree.get_children():
+            # Iterate over file nodes
+            for file_node in self.file_tree.get_children(lang_node):
+                values = self.file_tree.item(file_node, 'values')
+                if values and values[0] == target_str:
+                    self.file_tree.selection_set(file_node)
+                    self.file_tree.see(file_node)
+                    return
+
     def save_file(self, silent=False):
         if not self.current_file or not self.xml_tree:
             if not silent: messagebox.showwarning("Warning", "No file loaded.")
