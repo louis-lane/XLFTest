@@ -10,7 +10,6 @@ class EditorLogic:
         self.glossary_data = []
 
     def load_xliff(self, path):
-        """Parses an XLIFF file and returns a list of record dicts."""
         try:
             tree = etree.parse(path)
             data = []
@@ -32,11 +31,9 @@ class EditorLogic:
             raise ValueError(f"Could not parse XLIFF: {e}")
 
     def save_xliff(self, tree, path):
-        """Writes the XML tree back to disk."""
         tree.write(path, encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
     def load_glossary(self, path="glossary.xlsx"):
-        """Loads glossary into memory."""
         self.glossary_data = []
         if not Path(path).exists(): return
         
@@ -56,7 +53,6 @@ class EditorLogic:
         except Exception as e: print(f"Glossary Error: {e}")
 
     def find_glossary_matches(self, source_text, current_file_path):
-        """Returns a list of matching terms [(term, translation), ...]"""
         matches = []
         if not self.glossary_data or not source_text: return matches
 
@@ -75,7 +71,7 @@ class EditorLogic:
             if entry['match_type'] == 'exact':
                 if entry['case_sensitive']: is_match = (term == source_text)
                 else: is_match = (term.lower() == source_lower)
-            else: # Partial
+            else: 
                 if entry['case_sensitive']: is_match = (term in source_text)
                 else: is_match = (term.lower() in source_lower)
 
@@ -85,17 +81,36 @@ class EditorLogic:
 
     def extract_tags(self, text, syntax_mode="Standard XML <>"):
         """
-        Finds tags based on the selected syntax.
+        Finds tags using generic patterns and returns ONLY OPENING TAGS.
         """
         if not text: return []
         
-        # Regex Dictionary
+        # Generic Patterns that catch ANY tag name (e.g. [list], [actionset], <g>)
         patterns = {
-            "Standard XML <>": r"(<\/?[a-zA-Z0-9_\-]+[^>]*>|{[^}]+}|%[sd])",  # Matches <b>, </b>, {var}
-            "Gomo []": r"(\[/?(?:b|i|u|color|size|url|img)[^\]]*\]|{[^}]+}|%[sd])" # Matches [b], [/b], [img...], {var}
+            # Matches <anything attributes...> OR {var} OR %s
+            "Standard XML <>": r"(<[^>/]+[^>]*>|{[^}]+}|%[sd])",  
+            
+            # Matches [anything attributes...] OR {var} OR %s
+            # Note: We explicitly look for [ followed by NOT / to capture openers only
+            # But regex logic is easier if we catch all and filter below.
+            "Gomo []": r"(\[[^\]/]+\]|{[^}]+}|%[sd])" 
         }
         
-        # Default to Standard if unknown, else use selected
         pattern = patterns.get(syntax_mode, patterns["Standard XML <>"])
         
-        return list(set(re.findall(pattern, text)))
+        raw_matches = re.findall(pattern, text)
+        unique_openers = []
+        seen = set()
+
+        for tag in raw_matches:
+            # Filter out closing tags just in case regex caught them or user wants pure list
+            # XML closing: </...
+            # Gomo closing: [/...
+            if tag.startswith("</") or tag.startswith("[/"):
+                continue
+                
+            if tag not in seen:
+                seen.add(tag)
+                unique_openers.append(tag)
+        
+        return unique_openers
