@@ -27,12 +27,7 @@ class MainApp(ttk.Window):
         header = ttk.Frame(self, padding=10)
         header.pack(fill='x')
         
-        # Title (Optional, keeping removed as per previous request)
-        # ttk.Label(header, text="Localization Toolkit", font=("Helvetica", 16, "bold")).pack(side='left')
-        
         # RIGHT SIDE BUTTONS
-        # Pack order: First packed = Rightmost
-        
         # 1. Config Button (Far Right)
         ttk.Button(header, text="⚙ Config", command=self.open_config, bootstyle="secondary-outline").pack(side='right', padx=5)
         
@@ -58,7 +53,8 @@ class MainApp(ttk.Window):
     def show_help(self):
         help_win = ttk.Toplevel(self)
         help_win.title("Keyboard Shortcuts")
-        help_win.geometry("450x400")
+        # UPDATED GEOMETRY: Increased height to 600 to prevent cutoff
+        help_win.geometry("500x600")
         
         # Center content
         content = ttk.Frame(help_win, padding=20)
@@ -83,8 +79,8 @@ class MainApp(ttk.Window):
         ttk.Separator(content, orient='horizontal').pack(fill='x', pady=15)
         
         ttk.Label(content, text="Context Menus", font=("Helvetica", 12, "bold"), bootstyle="info").pack(pady=(10, 10))
-        ttk.Label(content, text="• Right-click the Grid to bulk update status.", font=("Helvetica", 9)).pack(anchor='w')
-        ttk.Label(content, text="• Right-click text boxes for Copy/Paste.", font=("Helvetica", 9)).pack(anchor='w')
+        ttk.Label(content, text="• Right-click the Grid to bulk update status.", font=("Helvetica", 9)).pack(anchor='w', pady=2)
+        ttk.Label(content, text="• Right-click text boxes for Copy/Paste.", font=("Helvetica", 9)).pack(anchor='w', pady=2)
 
         ttk.Button(content, text="Close", command=help_win.destroy, bootstyle="secondary").pack(side='bottom', pady=20)
 
