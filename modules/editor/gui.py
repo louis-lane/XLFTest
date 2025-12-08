@@ -5,15 +5,21 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-from utils.shared import get_target_language, log_errors, CONFIG
-# --- IMPORTS FROM NEW MODULES ---
+from utils.shared import get_target_language, log_errors, CONFIG, center_window
+import shutil
+import re
+import threading
+import os
+import pandas as pd
+
+# --- IMPORTS FROM SPLIT MODULES ---
 from modules.editor.popups import ToolTip, FindReplaceDialog, AddTermDialog
 from modules.editor.logic import EditorLogic
 
 class EditorTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        self.logic = EditorLogic() # Initialize Logic Engine
+        self.logic = EditorLogic() # Connect to Logic Module
         
         self.current_folder = None
         self.current_file = None
@@ -30,7 +36,7 @@ class EditorTab(ttk.Frame):
         self.setup_ui()
         self.setup_hotkeys()
         
-        # Load initial glossary
+        # Load initial glossary via logic
         self.logic.load_glossary()
 
     def setup_ui(self):
@@ -42,8 +48,15 @@ class EditorTab(ttk.Frame):
         self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
         ToolTip(self.btn_toggle_sidebar, "Toggle File Sidebar")
         
-        ttk.Button(self.toolbar, text="➜ Source", command=self.copy_source_to_target, bootstyle="link").pack(side=LEFT)
-        ttk.Button(self.toolbar, text="✖ Clear", command=self.clear_target, bootstyle="link").pack(side=LEFT)
+        # Global Actions
+        btn_copy = ttk.Button(self.toolbar, text="➜ Source", command=self.copy_source_to_target, bootstyle="link")
+        btn_copy.pack(side=LEFT)
+        ToolTip(btn_copy, "Copy Source to Target")
+        
+        btn_clear = ttk.Button(self.toolbar, text="✖ Clear", command=self.clear_target, bootstyle="link")
+        btn_clear.pack(side=LEFT)
+        ToolTip(btn_clear, "Clear Target")
+        
         ttk.Separator(self.toolbar, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
 
         # Filter Area
@@ -54,15 +67,18 @@ class EditorTab(ttk.Frame):
         self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=20)
         self.search_entry.pack(side=LEFT, padx=(0, 10))
         self.search_entry.bind("<KeyRelease>", self.apply_filter)
+        ToolTip(self.search_entry, "Search text")
         
         self.filter_var = tk.StringVar(value="All")
         self.filter_combo = ttk.Combobox(filter_frame, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=12)
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
+        ToolTip(self.filter_combo, "Filter by status")
 
         ttk.Button(self.toolbar, text="🔍 Find", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT, padx=5)
         self.btn_toggle_glossary = ttk.Button(self.toolbar, text="📖 Glossary", command=self.toggle_glossary, bootstyle="info-outline")
         self.btn_toggle_glossary.pack(side=RIGHT, padx=5)
+        ToolTip(self.btn_toggle_glossary, "Toggle Glossary")
 
         # 2. PANED WINDOWS
         self.main_split = tk_ttk.PanedWindow(self, orient=HORIZONTAL)
@@ -87,12 +103,19 @@ class EditorTab(ttk.Frame):
         # Grid
         self.grid_frame = ttk.Frame(self.editor_split)
         self.editor_split.add(self.grid_frame, weight=3)
+        
         cols = ("id", "source", "target", "status")
         self.tree = ttk.Treeview(self.grid_frame, columns=cols, show="headings", selectmode="extended")
-        self.tree.heading("id", text="ID"); self.tree.column("id", width=50)
+        self.tree.heading("id", text="ID"); self.tree.column("id", width=50, stretch=False)
         self.tree.heading("source", text="Original Source"); self.tree.column("source", width=300)
         self.tree.heading("target", text="Translation Target"); self.tree.column("target", width=300)
-        self.tree.heading("status", text="St"); self.tree.column("status", width=40, anchor="center")
+        self.tree.heading("status", text="St"); self.tree.column("status", width=40, anchor="center", stretch=False)
+        
+        # --- COLOR CONFIGURATION (Moved here to ensure persistence) ---
+        self.tree.tag_configure('new', foreground='#ff4d4d')
+        self.tree.tag_configure('needs_review', foreground='#ffad33')
+        self.tree.tag_configure('translated', foreground='#33cc33')
+        self.tree.tag_configure('final', foreground='#3399ff')
         
         grid_scroll = ttk.Scrollbar(self.grid_frame, orient=VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=grid_scroll.set)
@@ -110,29 +133,44 @@ class EditorTab(ttk.Frame):
         
         # Header Controls (Status, Formatting, Undo)
         h = ttk.Frame(self.edit_panel); h.pack(side=TOP, fill=X, pady=(0, 10))
+        
         ttk.Label(h, text="Status:").pack(side=LEFT)
         self.edit_status_var = tk.StringVar()
-        self.status_dropdown = ttk.Combobox(h, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=12)
+        self.status_dropdown = ttk.Combobox(h, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
         self.status_dropdown.pack(side=LEFT, padx=5)
+        ToolTip(self.status_dropdown, "Change Status")
         
         # Formatting Group
-        ttk.Button(h, text="B", width=2, command=lambda: self.insert_tag("b"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
-        ttk.Button(h, text="I", width=2, command=lambda: self.insert_tag("i"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
-        ttk.Button(h, text="U", width=2, command=lambda: self.insert_tag("u"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
+        b_b = ttk.Button(h, text="B", width=2, command=lambda: self.insert_tag("b"), bootstyle="secondary-outline")
+        b_b.pack(side=LEFT, padx=1); ToolTip(b_b, "Bold (Ctrl+B)")
+        
+        b_i = ttk.Button(h, text="I", width=2, command=lambda: self.insert_tag("i"), bootstyle="secondary-outline")
+        b_i.pack(side=LEFT, padx=1); ToolTip(b_i, "Italic (Ctrl+I)")
+        
+        b_u = ttk.Button(h, text="U", width=2, command=lambda: self.insert_tag("u"), bootstyle="secondary-outline")
+        b_u.pack(side=LEFT, padx=1); ToolTip(b_u, "Underline (Ctrl+U)")
+        
         ttk.Separator(h, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=5)
-        ttk.Button(h, text="↶", width=2, command=lambda: self.txt_target.edit_undo(), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
-        ttk.Button(h, text="↷", width=2, command=lambda: self.txt_target.edit_redo(), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
+        
+        b_un = ttk.Button(h, text="↶", width=2, command=lambda: self.txt_target.edit_undo(), bootstyle="secondary-outline")
+        b_un.pack(side=LEFT, padx=1); ToolTip(b_un, "Undo (Ctrl+Z)")
+        
+        b_re = ttk.Button(h, text="↷", width=2, command=lambda: self.txt_target.edit_redo(), bootstyle="secondary-outline")
+        b_re.pack(side=LEFT, padx=1); ToolTip(b_re, "Redo (Ctrl+Y)")
 
         # Save Group
         f_right = ttk.Frame(h); f_right.pack(side=RIGHT)
+        ttk.Label(f_right, text="[Ctrl+Enter to Save]", font=("Helvetica", 8), foreground="gray").pack(side=LEFT, padx=10)
         ttk.Button(f_right, text="<", width=3, command=lambda: self.navigate_grid(-1), bootstyle="secondary-outline").pack(side=LEFT)
         ttk.Button(f_right, text=">", width=3, command=lambda: self.navigate_grid(1), bootstyle="secondary-outline").pack(side=LEFT, padx=2)
-        ttk.Button(f_right, text="Save & Next", command=self.save_and_next, bootstyle="success").pack(side=LEFT, padx=5)
+        b_save = ttk.Button(f_right, text="Save & Next", command=self.save_and_next, bootstyle="success")
+        b_save.pack(side=LEFT, padx=5); ToolTip(b_save, "Save and Move Next")
 
         # Text Boxes
         ttk.Label(self.edit_panel, text="Source:", bootstyle="inverse-secondary").pack(anchor=W)
         self.txt_source = tk.Text(self.edit_panel, height=4, state=DISABLED, wrap="word")
         self.txt_source.pack(fill=BOTH, expand=True, pady=(0, 5))
+        self.txt_source.bind("<Button-3>", self.show_source_menu)
         
         ttk.Label(self.edit_panel, text="Target:", bootstyle="inverse-secondary").pack(anchor=W)
         self.txt_target = tk.Text(self.edit_panel, height=4, undo=True, maxundo=50, wrap="word")
@@ -152,6 +190,7 @@ class EditorTab(ttk.Frame):
         
         # Admin Button Container
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
+        ttk.Label(self.gloss_ctrl, text="Double-click to insert", font=("Helvetica", 7), foreground="gray").pack(side=LEFT)
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
     # --- LOGIC INTEGRATION ---
@@ -159,10 +198,8 @@ class EditorTab(ttk.Frame):
         folder = filedialog.askdirectory()
         if not folder: return
         self.current_folder = Path(folder)
-        # Clear
         for i in self.file_tree.get_children(): self.file_tree.delete(i)
         self.file_map = {}
-        # Scan
         xliffs = list(self.current_folder.glob("*.xliff"))
         for f in xliffs:
             lang = get_target_language(f)
@@ -223,12 +260,28 @@ class EditorTab(ttk.Frame):
             except Exception as e: messagebox.showerror("Error", f"Save failed: {e}")
 
     def restore_selection_after_refresh(self):
-        target_id = self.current_edit_id
+        # 1. Calc next ID
+        next_id = None
+        sel = self.tree.selection()
+        if sel:
+            all_items = self.tree.get_children()
+            try:
+                idx = all_items.index(sel[0])
+                if idx + 1 < len(all_items): 
+                    next_id = self.tree.item(all_items[idx+1], 'values')[0]
+            except ValueError: pass
+
+        # 2. Refresh List
         self.apply_filter()
+        
+        # 3. Restore or Advance
+        target_id = next_id if next_id else self.current_edit_id
         if target_id:
             for child in self.tree.get_children():
                 if str(self.tree.item(child, 'values')[0]) == str(target_id):
-                    self.tree.selection_set(child); self.tree.see(child); self.on_row_select(None); break
+                    self.tree.selection_set(child); self.tree.see(child); self.on_row_select(None); 
+                    self.txt_target.focus_set()
+                    break
 
     # --- POPUPS ---
     def open_find_replace_dialog(self):
@@ -236,7 +289,15 @@ class EditorTab(ttk.Frame):
         FindReplaceDialog(self, self.current_folder, self.current_file, self.file_map, self.load_file)
 
     def open_add_term_dialog(self):
-        AddTermDialog(self, self.current_file, self.logic.load_glossary)
+        # Pass callback to refresh glossary after save
+        def on_save():
+            self.logic.load_glossary()
+            # If editing, refresh glossary view immediately
+            if self.current_edit_id:
+                rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+                if rec: self.refresh_glossary_view(rec['source'])
+        
+        AddTermDialog(self, self.current_file, on_save)
 
     # --- HELPERS (Layout, Format, Hotkeys) ---
     def toggle_sidebar(self):
@@ -269,14 +330,28 @@ class EditorTab(ttk.Frame):
     def apply_filter(self, event=None):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
+        
         status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
         
         for rec in self.data_store:
-            if status_filter != "all" and str(rec['status']).lower().replace(" ", "") != status_filter.replace(" ", ""): continue
+            # Match Status
+            rec_status = str(rec['status']).lower().replace(" ", "").replace("-", "")
+            filter_clean = status_filter.replace(" ", "").replace("-", "")
+            if status_filter != "all" and rec_status != filter_clean: continue
+            
+            # Match Search
             if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
             
-            icon = status_map.get(str(rec['status']).lower(), '❓')
-            self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon))
+            # Icon
+            # Normalize status for map lookup
+            lookup_status = str(rec['status']).lower()
+            if lookup_status == 'needs_review': lookup_status = 'needs-review' # Handle mismatch
+            icon = status_map.get(lookup_status, '❓')
+            
+            # Tag normalization (spaces/hyphens -> underscores) for color
+            tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
+            
+            self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
 
     def insert_glossary_term(self, event):
         sel = self.gloss_tree.selection()
@@ -288,20 +363,8 @@ class EditorTab(ttk.Frame):
         self.txt_target.insert(tk.INSERT, translation)
 
     def save_and_next(self):
-        # Calc next ID
-        next_id = None
-        sel = self.tree.selection()
-        if sel:
-            all_items = self.tree.get_children()
-            idx = all_items.index(sel[0])
-            if idx + 1 < len(all_items): next_id = self.tree.item(all_items[idx+1], 'values')[0]
-        
-        self.save_segment()
-        
-        if next_id:
-            for child in self.tree.get_children():
-                if str(self.tree.item(child, 'values')[0]) == str(next_id):
-                    self.tree.selection_set(child); self.tree.see(child); self.on_row_select(None); self.txt_target.focus_set(); break
+        self.save_segment() 
+        # Note: Navigation handled in save_segment's restore function now
 
     def navigate_grid(self, direction):
         sel = self.tree.selection(); items = self.tree.get_children()
