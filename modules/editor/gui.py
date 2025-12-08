@@ -155,7 +155,6 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl_frame.pack(side=BOTTOM, fill=X, pady=5)
         ttk.Label(self.gloss_ctrl_frame, text="Double-click to insert", font=("Helvetica", 7), foreground="gray").pack(side=LEFT)
         
-        # --- ADMIN BUTTON (Hidden by Default) ---
         self.btn_add_term = ttk.Button(self.gloss_ctrl_frame, text="+ Add Term", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
         self.xml_tree = None
@@ -176,29 +175,67 @@ class EditorTab(ttk.Frame):
         
         self.admin_mode_active = not self.admin_mode_active
 
-    # --- GLOSSARY EDITOR LOGIC ---
+    # --- GLOSSARY EDITOR (UPDATED WITH NEW COLUMNS) ---
     def open_add_term_dialog(self):
         d = ttk.Toplevel(self)
         d.title("Add Glossary Term")
-        d.geometry("400x350")
+        d.geometry("500x550") 
+        
+        main_frame = ttk.Frame(d, padding=20)
+        main_frame.pack(fill=BOTH, expand=True)
         
         initial_source = ""
         try: initial_source = self.txt_source.get("sel.first", "sel.last")
         except: pass
 
-        ttk.Label(d, text="Source Term:", font=("Helvetica", 10, "bold")).pack(anchor=W, padx=10, pady=(10,0))
-        e_src = ttk.Entry(d); e_src.pack(fill=X, padx=10); e_src.insert(0, initial_source)
+        # --- Basic Fields ---
+        ttk.Label(main_frame, text="Source Term:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
+        e_src = ttk.Entry(main_frame, width=40)
+        e_src.pack(fill=X, pady=(0, 15))
+        e_src.insert(0, initial_source)
         
-        ttk.Label(d, text="Translation:", font=("Helvetica", 10, "bold")).pack(anchor=W, padx=10, pady=(10,0))
-        e_tgt = ttk.Entry(d); e_tgt.pack(fill=X, padx=10)
+        ttk.Label(main_frame, text="Translation:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
+        e_tgt = ttk.Entry(main_frame, width=40)
+        e_tgt.pack(fill=X, pady=(0, 15))
         
-        ttk.Label(d, text="Language Code:", font=("Helvetica", 10, "bold")).pack(anchor=W, padx=10, pady=(10,0))
-        
+        ttk.Label(main_frame, text="Language Code:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
         default_lang = ""
         if self.current_file: default_lang = get_target_language(self.current_file)
-        c_lang = ttk.Combobox(d, values=CONFIG.get("protected_languages", []))
-        c_lang.pack(fill=X, padx=10); c_lang.set(default_lang)
+        c_lang = ttk.Combobox(main_frame, values=CONFIG.get("protected_languages", []), width=38)
+        c_lang.pack(fill=X, pady=(0, 15))
+        c_lang.set(default_lang)
+
+        # --- Advanced Options Frame ---
+        adv_frame = ttk.Labelframe(main_frame, text="Advanced Settings", padding=10, bootstyle="secondary")
+        adv_frame.pack(fill=X, pady=(5, 10))
+
+        # Row 1: Match Type & Context
+        r1 = ttk.Frame(adv_frame)
+        r1.pack(fill=X, pady=5)
         
+        ttk.Label(r1, text="Match Type:").pack(side=LEFT)
+        match_var = tk.StringVar(value="partial")
+        c_match = ttk.Combobox(r1, textvariable=match_var, values=("partial", "exact", "regex"), state="readonly", width=10)
+        c_match.pack(side=LEFT, padx=(5, 15))
+
+        ttk.Label(r1, text="Context:").pack(side=LEFT)
+        e_context = ttk.Entry(r1, width=15)
+        e_context.pack(side=LEFT, padx=5, fill=X, expand=True)
+
+        # Row 2: Checkboxes
+        r2 = ttk.Frame(adv_frame)
+        r2.pack(fill=X, pady=5)
+        
+        case_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(r2, text="Case Sensitive", variable=case_var).pack(side=LEFT, padx=(0, 15))
+        
+        forbidden_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(r2, text="Mark as Forbidden", variable=forbidden_var).pack(side=LEFT)
+
+        # Focus Logic
+        if initial_source: e_tgt.focus_set() 
+        else: e_src.focus_set()
+
         def save_term():
             s, t, l = e_src.get().strip(), e_tgt.get().strip(), c_lang.get().strip()
             if not s or not t: messagebox.showwarning("Missing Data", "Source and Target are required."); return
@@ -208,7 +245,16 @@ class EditorTab(ttk.Frame):
                     if not messagebox.askyesno("Duplicate", "Term exists. Add duplicate?"): return
             
             g_path = Path("glossary.xlsx")
-            new_row = {"source_text": s, "target_text": t, "language_code": l}
+            # Build new row with extra columns
+            new_row = {
+                "source_text": s, 
+                "target_text": t, 
+                "language_code": l,
+                "match_type": match_var.get(),
+                "case_sensitive": str(case_var.get()).upper(),
+                "context": e_context.get().strip(),
+                "is_forbidden": str(forbidden_var.get()).upper()
+            }
             
             try:
                 if g_path.exists():
@@ -227,7 +273,10 @@ class EditorTab(ttk.Frame):
             except PermissionError: messagebox.showerror("File Locked", "Close glossary.xlsx first.")
             except Exception as e: messagebox.showerror("Error", f"Failed: {e}")
 
-        ttk.Button(d, text="Save Term", command=save_term, bootstyle="success").pack(pady=20, fill=X, padx=10)
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(side=BOTTOM, fill=X, pady=(10, 0))
+        ttk.Button(btn_frame, text="Cancel", command=d.destroy, bootstyle="secondary").pack(side=RIGHT, padx=(5, 0))
+        ttk.Button(btn_frame, text="Save Term", command=save_term, bootstyle="success").pack(side=RIGHT)
 
     # --- UI TOGGLE LOGIC ---
     def toggle_sidebar(self):
@@ -240,7 +289,7 @@ class EditorTab(ttk.Frame):
         else: self.main_split.add(self.right_sidebar, weight=1); self.btn_toggle_glossary.configure(bootstyle="info-outline")
         self.glossary_visible = not self.glossary_visible
 
-    # --- GLOSSARY LOGIC ---
+    # --- GLOSSARY LOGIC (UPDATED READ) ---
     def load_glossary_data(self):
         g_path = Path("glossary.xlsx")
         if not g_path.exists(): return
@@ -252,7 +301,12 @@ class EditorTab(ttk.Frame):
                     self.glossary_data.append({
                         "source": str(row['source_text']).strip(),
                         "target": str(row['target_text']).strip(),
-                        "lang": str(row.get('language_code', '')).strip()
+                        "lang": str(row.get('language_code', '')).strip(),
+                        # Read new columns safely
+                        "match_type": str(row.get('match_type', 'partial')).strip(),
+                        "case_sensitive": str(row.get('case_sensitive', 'FALSE')).strip().upper() == 'TRUE',
+                        "context": str(row.get('context', '')).strip(),
+                        "is_forbidden": str(row.get('is_forbidden', 'FALSE')).strip().upper() == 'TRUE'
                     })
         except Exception as e: print(f"Glossary load error: {e}")
 
@@ -262,17 +316,45 @@ class EditorTab(ttk.Frame):
         current_lang = "unknown"
         if self.current_file: current_lang = get_target_language(self.current_file)
         source_lower = source_text.lower()
+        
         for entry in self.glossary_data:
+            # Skip Forbidden (for now, or highlight differently later)
+            if entry['is_forbidden']: continue 
+
             if entry['lang'] and current_lang != "unknown":
                 if not current_lang.lower().startswith(entry['lang'].lower()): continue
+            
             term = entry['source']
-            if term.lower() in source_lower: self.gloss_tree.insert("", "end", values=(term, entry['target']))
+            match = False
+            
+            # Use new match types
+            if entry['match_type'] == 'exact':
+                if entry['case_sensitive']: match = (term == source_text)
+                else: match = (term.lower() == source_lower)
+            elif entry['match_type'] == 'regex':
+                try: 
+                    flags = 0 if entry['case_sensitive'] else re.IGNORECASE
+                    if re.search(term, source_text, flags): match = True
+                except: pass
+            else: # partial (default)
+                if entry['case_sensitive']: match = (term in source_text)
+                else: match = (term.lower() in source_lower)
+
+            if match: 
+                # Add context to display if available
+                display_term = term
+                if entry['context']: display_term += f" ({entry['context']})"
+                self.gloss_tree.insert("", "end", values=(display_term, entry['target']))
 
     def insert_glossary_term(self, event):
         sel = self.gloss_tree.selection()
         if not sel: return
-        val = self.gloss_tree.item(sel[0], 'values')
-        self.txt_target.insert(tk.INSERT, val[1]); self.txt_target.focus_set()
+        translation = self.gloss_tree.item(sel[0], 'values')[1]
+        
+        self.txt_target.focus_set()
+        try: self.txt_target.delete("sel.first", "sel.last")
+        except: pass
+        self.txt_target.insert(tk.INSERT, translation)
 
     # --- HOTKEYS ---
     def setup_hotkeys(self):
@@ -283,8 +365,6 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Alt-c>", lambda e: self.copy_source_to_clipboard())
         self.tree.bind("<Control-Up>", lambda e: self.navigate_grid(-1))
         self.tree.bind("<Control-Down>", lambda e: self.navigate_grid(1))
-        
-        # --- NEW ADMIN TOGGLE KEY (Ctrl+Shift+Q) ---
         self.bind_all("<Control-Q>", self.toggle_admin_mode) 
 
     # --- NAVIGATION ---
