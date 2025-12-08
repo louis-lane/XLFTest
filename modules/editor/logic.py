@@ -2,6 +2,7 @@ import pandas as pd
 from lxml import etree
 from pathlib import Path
 from utils.shared import get_target_language
+import re
 
 class EditorLogic:
     def __init__(self):
@@ -21,16 +22,10 @@ class EditorLogic:
                 tgt_node = tu.find('xliff:target', namespaces=self.namespaces)
                 tgt = (tgt_node.text or "") if tgt_node is not None else ""
                 
-                # Default status is 'new' if not present
                 status = tgt_node.get('state', 'new') if tgt_node is not None else 'new'
                 
                 data.append({
-                    'id': uid,
-                    'source': src,
-                    'target': tgt,
-                    'status': status,
-                    # We store the XML node to make saving faster later
-                    'node': tu 
+                    'id': uid, 'source': src, 'target': tgt, 'status': status, 'node': tu 
                 })
             return tree, data
         except Exception as e:
@@ -48,7 +43,6 @@ class EditorLogic:
         try:
             df = pd.read_excel(path).fillna("")
             for _, row in df.iterrows():
-                # Validate minimal data
                 if str(row.get('source_text', '')).strip() and str(row.get('target_text', '')).strip():
                     self.glossary_data.append({
                         "source": str(row['source_text']).strip(),
@@ -59,15 +53,7 @@ class EditorLogic:
                         "context": str(row.get('context', '')).strip(),
                         "is_forbidden": str(row.get('is_forbidden', 'FALSE')).strip().upper() == 'TRUE'
                     })
-        except Exception as e:
-            print(f"Glossary Error: {e}")
-
-    def extract_tags(self, text):
-        """Finds tags (e.g. <g id="1">) or variables ({name}) in text."""
-        if not text: return []
-        # Matches: <tag>, </tag>, {variable}, %s, %d
-        pattern = r"(<\/?[a-zA-Z0-9_\-]+[^>]*>|{[^}]+}|%[sd])"
-        return list(set(re.findall(pattern, text))) # Return unique tags
+        except Exception as e: print(f"Glossary Error: {e}")
 
     def find_glossary_matches(self, source_text, current_file_path):
         """Returns a list of matching terms [(term, translation), ...]"""
@@ -80,24 +66,36 @@ class EditorLogic:
 
         for entry in self.glossary_data:
             if entry['is_forbidden']: continue
-            
-            # Language Check
             if entry['lang'] and current_lang != "unknown":
                 if not current_lang.lower().startswith(entry['lang'].lower()): continue
 
-            # Matching Logic
             term = entry['source']
             is_match = False
             
             if entry['match_type'] == 'exact':
                 if entry['case_sensitive']: is_match = (term == source_text)
                 else: is_match = (term.lower() == source_lower)
-            # Add Regex support if needed here
             else: # Partial
                 if entry['case_sensitive']: is_match = (term in source_text)
                 else: is_match = (term.lower() in source_lower)
 
-            if is_match:
-                matches.append((term, entry['target']))
+            if is_match: matches.append((term, entry['target']))
         
         return matches
+
+    def extract_tags(self, text, syntax_mode="Standard XML <>"):
+        """
+        Finds tags based on the selected syntax.
+        """
+        if not text: return []
+        
+        # Regex Dictionary
+        patterns = {
+            "Standard XML <>": r"(<\/?[a-zA-Z0-9_\-]+[^>]*>|{[^}]+}|%[sd])",  # Matches <b>, </b>, {var}
+            "Gomo []": r"(\[/?(?:b|i|u|color|size|url|img)[^\]]*\]|{[^}]+}|%[sd])" # Matches [b], [/b], [img...], {var}
+        }
+        
+        # Default to Standard if unknown, else use selected
+        pattern = patterns.get(syntax_mode, patterns["Standard XML <>"])
+        
+        return list(set(re.findall(pattern, text)))
