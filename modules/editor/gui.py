@@ -45,10 +45,17 @@ class EditorTab(ttk.Frame):
         self.toolbar = ttk.Frame(self, padding=(5, 5))
         self.toolbar.pack(side=TOP, fill=X)
 
+        # File Sidebar Toggle
         self.btn_toggle_sidebar = ttk.Button(self.toolbar, text="🗖", command=self.toggle_sidebar, bootstyle="secondary-outline", width=3)
         self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
         ToolTip(self.btn_toggle_sidebar, "Toggle File Sidebar")
         
+        # Save Button (NEW)
+        self.btn_save_file = ttk.Button(self.toolbar, text="💾 Save", command=self.save_file, bootstyle="success")
+        self.btn_save_file.pack(side=LEFT, padx=(0, 10))
+        ToolTip(self.btn_save_file, "Save changes to file")
+
+        # Tag Syntax
         ttk.Label(self.toolbar, text="Tag Syntax:").pack(side=LEFT, padx=(0, 5))
         self.tag_syntax_var = tk.StringVar(value="Standard XML <>")
         self.combo_syntax = ttk.Combobox(self.toolbar, textvariable=self.tag_syntax_var, values=("Standard XML <>", "Gomo []"), state="readonly", width=15)
@@ -56,6 +63,7 @@ class EditorTab(ttk.Frame):
         self.combo_syntax.bind("<<ComboboxSelected>>", self.on_syntax_change)
         ToolTip(self.combo_syntax, "Select tag format")
 
+        # Copy/Clear Buttons
         btn_copy = ttk.Button(self.toolbar, text="➜ Source", command=self.copy_source_to_target, bootstyle="link")
         btn_copy.pack(side=LEFT)
         btn_clear = ttk.Button(self.toolbar, text="✖ Clear", command=self.clear_target, bootstyle="link")
@@ -77,6 +85,7 @@ class EditorTab(ttk.Frame):
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
+        # Right Sidebar Toggles
         self.btn_toggle_find = ttk.Button(self.toolbar, text="🔍 Find", command=self.toggle_find_replace, bootstyle="warning-outline")
         self.btn_toggle_find.pack(side=RIGHT, padx=5)
         self.btn_toggle_glossary = ttk.Button(self.toolbar, text="📖 Glossary", command=self.toggle_glossary, bootstyle="info-outline")
@@ -205,7 +214,7 @@ class EditorTab(ttk.Frame):
             except: pass
         else:
             # Show the panel if it's hidden but needs to be visible
-            # FIXED: Used 'panes()' to check existence instead of 'index()' which crashes
+            # Uses 'panes()' to check existence safely without TclError
             if str(self.right_sidebar) not in self.main_split.panes():
                 self.main_split.add(self.right_sidebar, weight=1)
 
@@ -246,12 +255,9 @@ class EditorTab(ttk.Frame):
     def open_find_replace_dialog(self):
         if not self.find_visible: self.toggle_find_replace()
 
-    # --- POPUP LOGIC (ADDED MISSING METHOD) ---
+    # --- POPUP LOGIC ---
     def open_add_term_dialog(self):
-        # Initializes the AddTermDialog with self as parent and the logic engine
         AddTermDialog(self, self.logic)
-        
-        # After dialog closes, refresh glossary if a segment is selected
         if self.current_edit_id:
             rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
             if rec: self.refresh_glossary_view(rec['source'])
@@ -330,7 +336,7 @@ class EditorTab(ttk.Frame):
                 if start_sel and end_sel: self.txt_target.tag_remove("sel", "1.0", END); self.txt_target.tag_add("sel", start_sel, end_sel)
         except: pass
 
-    # --- STANDARD METHODS ---
+    # --- DATA & IO METHODS ---
     def load_project_folder(self):
         folder = filedialog.askdirectory()
         if not folder: return
@@ -359,6 +365,16 @@ class EditorTab(ttk.Frame):
             self.xml_tree, self.data_store = self.logic.load_xliff(path)
             self.apply_filter()
         except Exception as e: messagebox.showerror("Error", str(e))
+    
+    def save_file(self):
+        if not self.current_file or not self.xml_tree:
+            messagebox.showwarning("Warning", "No file loaded.")
+            return
+        try:
+            self.logic.save_xliff(self.xml_tree, self.current_file)
+            messagebox.showinfo("Success", f"File saved: {Path(self.current_file).name}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save: {e}")
 
     def on_row_select(self, event):
         sel = self.tree.selection()
@@ -387,10 +403,42 @@ class EditorTab(ttk.Frame):
         except: pass
         self.txt_target.insert(tk.INSERT, translation)
 
+    def save_segment(self):
+        if not self.current_edit_id: return
+        
+        # 1. Capture Data
+        new_target = self.txt_target.get("1.0", "end-1c")
+        new_status = self.edit_status_var.get()
+        
+        # 2. Update Internal Model
+        rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+        if rec:
+            rec['target'] = new_target
+            rec['status'] = new_status
+            
+            # 3. Update UI Grid (Treeview)
+            status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
+            icon = status_map.get(str(new_status).lower(), '❓')
+            tag = str(new_status).lower().replace(" ", "_").replace("-", "_")
+            
+            for child in self.tree.get_children():
+                if str(self.tree.item(child, 'values')[0]) == str(self.current_edit_id):
+                    self.tree.item(child, values=(rec['id'], rec['source'].replace('\n', ' '), new_target.replace('\n', ' '), icon), tags=(tag,))
+                    break
+            
+            # 4. Update XML Object (so it is ready for saving to disk)
+            if 'node' in rec:
+                tu = rec['node']
+                ns = self.logic.namespaces
+                tgt_node = tu.find('xliff:target', namespaces=ns)
+                if tgt_node is None:
+                    tgt_node = etree.SubElement(tu, f"{{{ns['xliff']}}}target")
+                tgt_node.text = new_target
+                tgt_node.set('state', new_status)
+
     def save_and_next(self):
-        # NOTE: logic.save_segment or similar needs to be called here.
-        # Assuming you will implement save_segment or it's handled in logic.py
-        pass 
+        self.save_segment()
+        self.navigate_grid(1)
 
     def navigate_grid(self, direction):
         sel = self.tree.selection(); items = self.tree.get_children()
@@ -405,6 +453,7 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Control-i>", lambda e: self.format_text("i") or "break")
         self.txt_target.bind("<Control-u>", lambda e: self.format_text("u") or "break")
         self.bind_all("<Control-Q>", self.toggle_admin_mode)
+        self.bind_all("<Control-s>", lambda e: self.save_file())
         
     def toggle_admin_mode(self, event=None):
         self.admin_mode_active = not self.admin_mode_active
