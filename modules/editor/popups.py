@@ -250,7 +250,9 @@ class FindReplacePane(ttk.Labelframe):
         f_path = tags[0]; t_id = tags[1]
         
         if str(self.editor.current_file) != str(f_path): 
-            self.editor.load_file(f_path)
+            # FIXED: Use safe switching method to check for unsaved changes
+            success = self.editor.request_file_switch(f_path)
+            if not success: return
             
         for c in self.editor.tree.get_children():
             if str(self.editor.tree.item(c, 'values')[0]) == str(t_id): 
