@@ -201,26 +201,33 @@ class EditorTab(ttk.Frame):
         # --- SEARCHABLE LANGUAGE DROPDOWN ---
         ttk.Label(main_frame, text="Language Code:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
         
-        # 1. Get List and Default
         all_langs = CONFIG.get("protected_languages", [])
         default_lang = ""
         if self.current_file: default_lang = get_target_language(self.current_file)
         
-        # 2. Create Combobox
         c_lang = ttk.Combobox(main_frame, values=all_langs, width=38)
         c_lang.pack(fill=X, pady=(0, 15))
         c_lang.set(default_lang)
 
-        # 3. Add Autocomplete/Filter Logic
+        # --- AUTO-OPEN & FILTER LOGIC ---
         def filter_lang_options(event):
+            # Ignore standard nav keys so user can move up/down
+            if event.keysym in ['Up', 'Down', 'Return', 'Left', 'Right']:
+                return
+
             typed = c_lang.get()
             if typed == '':
                 c_lang['values'] = all_langs
             else:
-                # Filter list case-insensitive
                 filtered = [x for x in all_langs if typed.lower() in x.lower()]
                 c_lang['values'] = filtered
-                
+            
+            # Force dropdown open to show results
+            try:
+                c_lang.event_generate('<Down>') 
+            except: 
+                pass # Safety catch for some OS behaviors
+
         c_lang.bind('<KeyRelease>', filter_lang_options)
 
         adv_frame = ttk.Labelframe(main_frame, text="Advanced Settings", padding=10, bootstyle="secondary")
