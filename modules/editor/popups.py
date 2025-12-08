@@ -128,7 +128,6 @@ class AddTermDialog(ttk.Toplevel):
         except PermissionError: messagebox.showerror("File Locked", "Close glossary.xlsx first.")
         except Exception as e: messagebox.showerror("Error", f"Failed: {e}")
 
-# --- UPDATED: COMPACT FIND REPLACE PANE ---
 class FindReplacePane(ttk.Labelframe):
     def __init__(self, parent, editor_instance):
         super().__init__(parent, text="Find & Replace", padding=5, bootstyle="warning")
@@ -138,21 +137,19 @@ class FindReplacePane(ttk.Labelframe):
         input_frame = ttk.Frame(self)
         input_frame.pack(fill=X, pady=2)
         
-        # Row 1: Find Input + Button
         ttk.Label(input_frame, text="Find:").grid(row=0, column=0, sticky="w", padx=2)
         self.e_find = ttk.Entry(input_frame)
         self.e_find.grid(row=0, column=1, sticky="ew", padx=2)
         ttk.Button(input_frame, text="Find", command=lambda: self.run_thread("find"), bootstyle="info-outline", width=6).grid(row=0, column=2, padx=2)
         
-        # Row 2: Replace Input + Button
         ttk.Label(input_frame, text="Repl:").grid(row=1, column=0, sticky="w", padx=2)
         self.e_repl = ttk.Entry(input_frame)
         self.e_repl.grid(row=1, column=1, sticky="ew", padx=2)
         ttk.Button(input_frame, text="All", command=lambda: self.run_thread("replace"), bootstyle="danger-outline", width=6).grid(row=1, column=2, padx=2)
         
-        input_frame.columnconfigure(1, weight=1) # Entry expands
+        input_frame.columnconfigure(1, weight=1)
 
-        # --- COMPACT OPTIONS (Single Line) ---
+        # --- COMPACT OPTIONS ---
         opt_frame = ttk.Frame(self)
         opt_frame.pack(fill=X, pady=2)
         
@@ -160,7 +157,7 @@ class FindReplacePane(ttk.Labelframe):
         self.var_regex = tk.BooleanVar(); ttk.Checkbutton(opt_frame, text="Regex", variable=self.var_regex).pack(side=LEFT, padx=2)
         self.var_back = tk.BooleanVar(value=True); ttk.Checkbutton(opt_frame, text="Backup", variable=self.var_back).pack(side=LEFT, padx=2)
 
-        # --- SCOPE SELECTION (Compact) ---
+        # --- SCOPE SELECTION ---
         scope_frame = ttk.Frame(self)
         scope_frame.pack(fill=X, pady=2)
         ttk.Label(scope_frame, text="Scope:", font=("Helvetica", 8, "bold")).pack(side=LEFT)
@@ -194,12 +191,10 @@ class FindReplacePane(ttk.Labelframe):
         
         if not current_f and scope != "all_files": return
 
-        # --- SCOPE LOGIC ---
         files = []
         if scope == "current_file":
             files = [Path(current_f)]
         elif scope == "current_lang":
-            # Search only files matching the current file's language
             cur_lang = get_target_language(current_f)
             if cur_lang in file_map:
                 files = file_map[cur_lang]
