@@ -35,9 +35,11 @@ def load_config():
     if getattr(sys, 'frozen', False):
         app_path = Path(sys.executable).parent
     else:
-        # Assumes shared.py is in /utils, so root is parent
+        # Robust lookup: try parent, then parent's parent
         app_path = Path(__file__).parent.parent
-        
+        if not (app_path / "config.json").exists():
+             app_path = Path(__file__).parent.parent.parent
+
     config_path = app_path / "config.json"
     current = DEFAULT_CONFIG.copy()
     
@@ -56,7 +58,6 @@ CONFIG = load_config()
 
 # --- GUI HELPERS ---
 def center_window(popup, width, height, parent):
-    """Centers a popup window relative to the parent window."""
     popup.update_idletasks()
     root = parent.winfo_toplevel()
     x = root.winfo_x() + (root.winfo_width() // 2) - (width // 2)
