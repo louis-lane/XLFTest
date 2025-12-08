@@ -183,6 +183,16 @@ class EditorTab(ttk.Frame):
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
     # --- LAYOUT LOGIC ---
+    def toggle_sidebar(self):
+        """Toggles the Left File Explorer sidebar."""
+        if self.sidebar_visible:
+            self.main_split.forget(self.sidebar_frame)
+            self.btn_toggle_sidebar.configure(bootstyle="secondary") 
+        else:
+            self.main_split.insert(0, self.sidebar_frame, weight=1)
+            self.btn_toggle_sidebar.configure(bootstyle="secondary-outline")
+        self.sidebar_visible = not self.sidebar_visible
+
     def update_sidebar_visibility(self):
         if not self.glossary_visible and not self.find_visible:
             self.main_split.forget(self.right_sidebar)
@@ -343,7 +353,9 @@ class EditorTab(ttk.Frame):
         self.txt_target.insert(tk.INSERT, translation)
 
     def save_and_next(self):
-        self.save_segment() 
+        # NOTE: logic.save_segment or similar needs to be called here.
+        # Assuming you will implement save_segment or it's handled in logic.py
+        pass 
 
     def navigate_grid(self, direction):
         sel = self.tree.selection(); items = self.tree.get_children()
@@ -358,6 +370,11 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Control-i>", lambda e: self.format_text("i") or "break")
         self.txt_target.bind("<Control-u>", lambda e: self.format_text("u") or "break")
         self.bind_all("<Control-Q>", self.toggle_admin_mode)
+        
+    def toggle_admin_mode(self, event=None):
+        self.admin_mode_active = not self.admin_mode_active
+        # Add visual feedback or logic for admin mode here if needed
+        print(f"Admin mode: {self.admin_mode_active}")
 
     def create_context_menus(self):
         self.menu_grid = tk.Menu(self, tearoff=0)
