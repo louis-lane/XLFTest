@@ -6,7 +6,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-from utils.shared import get_target_language
+from utils.shared import get_target_language, log_errors # <--- ADDED log_errors
 import shutil
 import re
 import threading
@@ -179,7 +179,6 @@ class EditorTab(ttk.Frame):
             
             for tu in self.xml_tree.xpath('//xliff:trans-unit', namespaces=self.namespaces):
                 uid = tu.get('id')
-                # Safety checks for None types using (text or "")
                 src_node = tu.find('xliff:source', namespaces=self.namespaces)
                 src = (src_node.text or "") if src_node is not None else ""
                 
@@ -201,12 +200,10 @@ class EditorTab(ttk.Frame):
         search_term = self.search_var.get().lower()
         
         for rec in self.data_store:
-            # Check Status
             s_status = str(rec['status']).lower()
             if filter_status != "all" and s_status.replace(" ", "") != filter_status.replace(" ", ""):
                 continue
             
-            # Check Search
             s_src = str(rec['source']).lower()
             s_tgt = str(rec['target']).lower()
             s_id = str(rec['id']).lower()
@@ -214,7 +211,6 @@ class EditorTab(ttk.Frame):
             if search_term and (search_term not in s_src and search_term not in s_tgt and search_term not in s_id):
                 continue
                 
-            # Flatten text for display
             display_src = rec['source'].replace('\n', ' ')
             display_tgt = rec['target'].replace('\n', ' ')
             
@@ -415,6 +411,9 @@ class EditorTab(ttk.Frame):
             
             progress['maximum'] = len(files_to_process)
             progress['value'] = 0
+            
+            # Use list to collect errors
+            process_errors = []
 
             # ROLLBACK
             if mode == "rollback":
@@ -425,11 +424,17 @@ class EditorTab(ttk.Frame):
                         try:
                             shutil.copy2(bak_path, file_path)
                             restored_count += 1
-                        except: pass
+                        except Exception as e: 
+                            process_errors.append(f"Failed to restore {file_path.name}: {e}")
                     progress['value'] = idx + 1
                     dialog.update_idletasks()
                 
-                messagebox.showinfo("Rollback", f"Restored {restored_count} files.")
+                if process_errors:
+                    log_errors(self.current_folder, process_errors)
+                    messagebox.showwarning("Rollback Warnings", f"Restored {restored_count} files.\nSome errors occurred (see log).")
+                else:
+                    messagebox.showinfo("Rollback", f"Restored {restored_count} files.")
+                
                 if self.current_file: self.load_file(self.current_file)
                 progress.pack_forget()
                 return
@@ -494,18 +499,27 @@ class EditorTab(ttk.Frame):
                         tree.write(str(file_path), encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
                 except Exception as e:
-                    print(f"Error {file_path}: {e}")
+                    process_errors.append(f"Error processing {file_path.name}: {e}")
                 
                 progress['value'] = idx + 1
                 dialog.update_idletasks()
 
             progress.pack_forget()
             
+            if process_errors:
+                log_errors(self.current_folder, process_errors)
+                err_msg = "\n(Some files failed - check error_log.txt)"
+            else:
+                err_msg = ""
+
             if mode == "replace":
-                messagebox.showinfo("Complete", f"Replaced {total_hits} occurrences.\nModified {files_mod} files.")
+                messagebox.showinfo("Complete", f"Replaced {total_hits} occurrences.\nModified {files_mod} files.{err_msg}")
                 if self.current_file: self.load_file(self.current_file)
-            elif mode == "find" and total_hits == 0:
-                messagebox.showinfo("Result", "No matches found.")
+            elif mode == "find":
+                if total_hits == 0:
+                    messagebox.showinfo("Result", f"No matches found.{err_msg}")
+                elif err_msg:
+                    messagebox.showwarning("Warning", f"Found {total_hits} matches.{err_msg}")
 
         # Thread Wrappers
         def thread_find(): threading.Thread(target=lambda: run_processing("find")).start()
