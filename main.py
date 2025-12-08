@@ -2,6 +2,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from modules.converter.gui import ConverterTab
 from modules.editor.gui import EditorTab
+from utils.shared import center_window # <--- IMPORTED
 import os
 from pathlib import Path
 import sys
@@ -10,7 +11,6 @@ class MainApp(ttk.Window):
     def __init__(self):
         super().__init__(themename="darkly") 
         self.title("Localization Toolkit")
-        # UPDATED: Larger default window size
         self.geometry("1400x900")
 
         # --- SET ICON ---
@@ -49,7 +49,9 @@ class MainApp(ttk.Window):
     def show_help(self):
         help_win = ttk.Toplevel(self)
         help_win.title("Keyboard Shortcuts")
-        help_win.geometry("500x600")
+        
+        # --- USE SHARED CENTER FUNCTION ---
+        center_window(help_win, 500, 600, self) 
         
         content = ttk.Frame(help_win, padding=20)
         content.pack(fill='both', expand=True)
