@@ -28,7 +28,6 @@ class EditorTab(ttk.Frame):
         self.data_store = []
         self.current_edit_id = None
         
-        # Flags
         self.sidebar_visible = True
         self.glossary_visible = True
         self.find_visible = False
@@ -165,11 +164,9 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
 
         # 3. RIGHT SIDEBAR (CONTAINER)
-        # We start with it added, but its children dictate what's shown
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
         
-        # Glossary Pane (Initially Visible)
         self.glossary_frame = ttk.Labelframe(self.right_sidebar, text="Glossary", padding=5, bootstyle="info")
         self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
         
@@ -181,13 +178,10 @@ class EditorTab(ttk.Frame):
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
-        # Find & Replace Pane (Initially Hidden)
-        # Note: We create it but don't pack it yet
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
-    # --- LAYOUT TOGGLING LOGIC ---
+    # --- LAYOUT LOGIC ---
     def update_sidebar_visibility(self):
-        """Show/Hide the main right sidebar container based on children."""
         if not self.glossary_visible and not self.find_visible:
             self.main_split.forget(self.right_sidebar)
         else:
@@ -387,7 +381,7 @@ class EditorTab(ttk.Frame):
         try: w.insert(tk.INSERT, self.clipboard_get())
         except: pass
     
-    # --- MISSING APPLY_FILTER ---
+    # --- RE-ADDED MISSING FILTER FUNCTION ---
     def apply_filter(self, event=None):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
