@@ -128,51 +128,57 @@ class AddTermDialog(ttk.Toplevel):
         except PermissionError: messagebox.showerror("File Locked", "Close glossary.xlsx first.")
         except Exception as e: messagebox.showerror("Error", f"Failed: {e}")
 
-# --- NEW: FIND REPLACE PANE (Embedded) ---
+# --- UPDATED: COMPACT FIND REPLACE PANE ---
 class FindReplacePane(ttk.Labelframe):
     def __init__(self, parent, editor_instance):
-        super().__init__(parent, text="Find & Replace", padding=10, bootstyle="warning")
-        self.editor = editor_instance # Reference to main editor for data access
+        super().__init__(parent, text="Find & Replace", padding=5, bootstyle="warning")
+        self.editor = editor_instance
         
-        # Inputs
-        f1 = ttk.Frame(self); f1.pack(fill=X, pady=2)
-        ttk.Label(f1, text="Find:").pack(anchor=W)
-        self.e_find = ttk.Entry(f1); self.e_find.pack(fill=X)
+        # --- COMPACT HEADER (Grid Layout) ---
+        input_frame = ttk.Frame(self)
+        input_frame.pack(fill=X, pady=2)
         
-        ttk.Label(f1, text="Replace:").pack(anchor=W)
-        self.e_repl = ttk.Entry(f1); self.e_repl.pack(fill=X)
+        # Row 1: Find Input + Button
+        ttk.Label(input_frame, text="Find:").grid(row=0, column=0, sticky="w", padx=2)
+        self.e_find = ttk.Entry(input_frame)
+        self.e_find.grid(row=0, column=1, sticky="ew", padx=2)
+        ttk.Button(input_frame, text="Find", command=lambda: self.run_thread("find"), bootstyle="info-outline", width=6).grid(row=0, column=2, padx=2)
         
-        # Options
-        f2 = ttk.Frame(self); f2.pack(fill=X, pady=5)
-        self.var_case = tk.BooleanVar()
-        ttk.Checkbutton(f2, text="Match Case", variable=self.var_case).pack(anchor=W)
-        self.var_regex = tk.BooleanVar()
-        ttk.Checkbutton(f2, text="Regex", variable=self.var_regex).pack(anchor=W)
+        # Row 2: Replace Input + Button
+        ttk.Label(input_frame, text="Repl:").grid(row=1, column=0, sticky="w", padx=2)
+        self.e_repl = ttk.Entry(input_frame)
+        self.e_repl.grid(row=1, column=1, sticky="ew", padx=2)
+        ttk.Button(input_frame, text="All", command=lambda: self.run_thread("replace"), bootstyle="danger-outline", width=6).grid(row=1, column=2, padx=2)
         
-        # Scope
-        f3 = ttk.Frame(self); f3.pack(fill=X, pady=5)
-        ttk.Label(f3, text="Scope:").pack(anchor=W)
+        input_frame.columnconfigure(1, weight=1) # Entry expands
+
+        # --- COMPACT OPTIONS (Single Line) ---
+        opt_frame = ttk.Frame(self)
+        opt_frame.pack(fill=X, pady=2)
+        
+        self.var_case = tk.BooleanVar(); ttk.Checkbutton(opt_frame, text="Case", variable=self.var_case).pack(side=LEFT, padx=2)
+        self.var_regex = tk.BooleanVar(); ttk.Checkbutton(opt_frame, text="Regex", variable=self.var_regex).pack(side=LEFT, padx=2)
+        self.var_back = tk.BooleanVar(value=True); ttk.Checkbutton(opt_frame, text="Backup", variable=self.var_back).pack(side=LEFT, padx=2)
+
+        # --- SCOPE SELECTION (Compact) ---
+        scope_frame = ttk.Frame(self)
+        scope_frame.pack(fill=X, pady=2)
+        ttk.Label(scope_frame, text="Scope:", font=("Helvetica", 8, "bold")).pack(side=LEFT)
         self.var_scope = tk.StringVar(value="current_file")
-        ttk.Radiobutton(f3, text="Current File", variable=self.var_scope, value="current_file").pack(anchor=W)
-        ttk.Radiobutton(f3, text="All Files", variable=self.var_scope, value="all_files").pack(anchor=W)
-        self.var_back = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f3, text="Create Backup", variable=self.var_back).pack(anchor=W, pady=(5,0))
+        
+        ttk.Radiobutton(scope_frame, text="File", variable=self.var_scope, value="current_file").pack(side=LEFT, padx=2)
+        ttk.Radiobutton(scope_frame, text="Lang", variable=self.var_scope, value="current_lang").pack(side=LEFT, padx=2)
+        ttk.Radiobutton(scope_frame, text="All", variable=self.var_scope, value="all_files").pack(side=LEFT, padx=2)
 
-        # Actions
-        btn_frame = ttk.Frame(self); btn_frame.pack(fill=X, pady=10)
-        ttk.Button(btn_frame, text="Find", command=lambda: self.run_thread("find"), bootstyle="info-outline").pack(side=LEFT, fill=X, expand=True, padx=(0,2))
-        ttk.Button(btn_frame, text="Replace All", command=lambda: self.run_thread("replace"), bootstyle="danger-outline").pack(side=LEFT, fill=X, expand=True, padx=(2,0))
-
-        # Results
-        ttk.Label(self, text="Results:").pack(anchor=W, pady=(5, 0))
+        # --- RESULTS TREE ---
         self.res_tree = ttk.Treeview(self, columns=("loc", "txt"), show="headings", height=6)
-        self.res_tree.heading("loc", text="File/ID"); self.res_tree.column("loc", width=80)
+        self.res_tree.heading("loc", text="Loc"); self.res_tree.column("loc", width=60)
         self.res_tree.heading("txt", text="Match"); self.res_tree.column("txt", width=120)
-        self.res_tree.pack(fill=BOTH, expand=True, pady=5)
+        self.res_tree.pack(fill=BOTH, expand=True, pady=2)
         self.res_tree.bind("<Double-1>", self.jump_to_result)
         
-        self.prog = ttk.Progressbar(self, mode='determinate', bootstyle="warning-striped")
-        self.prog.pack(fill=X, pady=(5,0))
+        self.prog = ttk.Progressbar(self, mode='determinate', bootstyle="warning-striped", height=5)
+        self.prog.pack(fill=X, pady=(2,0))
 
     def run_thread(self, mode):
         import threading
@@ -182,13 +188,23 @@ class FindReplacePane(ttk.Labelframe):
         find = self.e_find.get(); repl = self.e_repl.get()
         if not find: return
         
-        # Access editor data via self.editor
         current_f = self.editor.current_file
         file_map = self.editor.file_map
+        scope = self.var_scope.get()
         
-        if not current_f and self.var_scope.get() == "current_file": return
+        if not current_f and scope != "all_files": return
 
-        files = [Path(current_f)] if self.var_scope.get() == "current_file" else [f for l in file_map.values() for f in l]
+        # --- SCOPE LOGIC ---
+        files = []
+        if scope == "current_file":
+            files = [Path(current_f)]
+        elif scope == "current_lang":
+            # Search only files matching the current file's language
+            cur_lang = get_target_language(current_f)
+            if cur_lang in file_map:
+                files = file_map[cur_lang]
+        else: # All files
+            for l in file_map.values(): files.extend(l)
         
         pat = None
         if self.var_regex.get():
@@ -198,7 +214,6 @@ class FindReplacePane(ttk.Labelframe):
         self.prog['maximum'] = len(files); hits = 0; mods = 0
         namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
         
-        # Clear results
         if mode == "find":
             for i in self.res_tree.get_children(): self.res_tree.delete(i)
 
@@ -218,7 +233,8 @@ class FindReplacePane(ttk.Labelframe):
                         if found:
                             hits+=1
                             if mode=="find": 
-                                self.res_tree.insert("", "end", values=(f"{fp.name} [{tu.get('id')}]", orig[:50]), tags=(str(fp), tu.get('id')))
+                                display_name = fp.name if scope != "current_file" else tu.get('id')
+                                self.res_tree.insert("", "end", values=(display_name, orig[:50]), tags=(str(fp), tu.get('id')))
                             if mode=="replace" and new!=orig: tn.text=new; tn.set('state', 'translated'); dirty=True
                 
                 if dirty and mode=="replace":
@@ -241,7 +257,6 @@ class FindReplacePane(ttk.Labelframe):
         if str(self.editor.current_file) != str(f_path): 
             self.editor.load_file(f_path)
             
-        # Highlight in tree
         for c in self.editor.tree.get_children():
             if str(self.editor.tree.item(c, 'values')[0]) == str(t_id): 
                 self.editor.tree.selection_set(c)
