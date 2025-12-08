@@ -80,7 +80,7 @@ def load_config():
     else:
         # Assumes this file is in utils/, so app root is one level up
         app_path = Path(__file__).parent.parent
-    
+        
     config_path = app_path / "config.json"
     current = DEFAULT_CONFIG.copy()
     
@@ -155,7 +155,6 @@ def xliff_to_dataframe(xliff_path):
         })
     return pd.DataFrame(records)
 
-# --- THIS WAS MISSING ---
 def update_glossary_file(glossary_path, new_entries):
     """Updates the glossary Excel file with new entries."""
     if Path(glossary_path).exists():
@@ -167,3 +166,26 @@ def update_glossary_file(glossary_path, new_entries):
     combined_df = pd.concat([glossary_df, new_entries_df], ignore_index=True)
     combined_df.drop_duplicates(subset=['source_text', 'language_code'], keep='first', inplace=True)
     combined_df.to_excel(glossary_path, index=False)
+
+def center_window(popup, width, height, parent):
+    """
+    Centers a popup window relative to the parent window.
+    """
+    popup.update_idletasks() # Ensure geometry data is ready
+    
+    # Get Parent Geometry
+    root = parent.winfo_toplevel()
+    root_x = root.winfo_x()
+    root_y = root.winfo_y()
+    root_w = root.winfo_width()
+    root_h = root.winfo_height()
+    
+    # Calculate Center
+    x = root_x + (root_w // 2) - (width // 2)
+    y = root_y + (root_h // 2) - (height // 2)
+    
+    # Safety Check (Prevent off-screen)
+    if x < 0: x = 0
+    if y < 0: y = 0
+    
+    popup.geometry(f"{width}x{height}+{x}+{y}")
