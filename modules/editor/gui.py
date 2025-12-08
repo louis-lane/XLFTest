@@ -37,6 +37,9 @@ class EditorTab(ttk.Frame):
         self.setup_hotkeys()
         self.logic.load_glossary()
 
+        # Apply initial layout based on flags above
+        self.update_sidebar_visibility()
+
     def setup_ui(self):
         # 1. GLOBAL TOOLBAR
         self.toolbar = ttk.Frame(self, padding=(5, 5))
@@ -167,9 +170,8 @@ class EditorTab(ttk.Frame):
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
         
-        # Glossary Pane (Initially Visible)
+        # Glossary Pane
         self.glossary_frame = ttk.Labelframe(self.right_sidebar, text="Glossary", padding=5, bootstyle="info")
-        self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
         
         self.gloss_tree = ttk.Treeview(self.glossary_frame, columns=("term", "trans"), show="headings")
         self.gloss_tree.heading("term", text="Term"); self.gloss_tree.heading("trans", text="Trans")
@@ -177,14 +179,13 @@ class EditorTab(ttk.Frame):
         self.gloss_tree.bind("<Double-1>", self.insert_glossary_term)
         
         self.gloss_ctrl = ttk.Frame(self.glossary_frame); self.gloss_ctrl.pack(side=BOTTOM, fill=X)
-        # THIS was the line causing the error because the function it pointed to didn't exist
         self.btn_add_term = ttk.Button(self.gloss_ctrl, text="+ Add", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
         self.btn_add_term.pack(side=RIGHT)
 
-        # Find Pane (Initially Hidden)
+        # Find Pane
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
-    # --- LAYOUT LOGIC (New Functions Added) ---
+    # --- LAYOUT LOGIC ---
     def toggle_sidebar(self):
         """Toggles the Left File Explorer sidebar."""
         if self.sidebar_visible:
@@ -196,34 +197,62 @@ class EditorTab(ttk.Frame):
         self.sidebar_visible = not self.sidebar_visible
 
     def update_sidebar_visibility(self):
+        """Handles showing/hiding the right sidebar and dynamic resizing of its panes."""
+        # 1. Manage the Main Container (Right Sidebar)
         if not self.glossary_visible and not self.find_visible:
-            self.main_split.forget(self.right_sidebar)
+            # Hide the entire right panel if both tools are off
+            try: self.main_split.forget(self.right_sidebar)
+            except: pass
         else:
-            if self.main_split.index(self.right_sidebar) < 0: 
+            # Show the panel if it's hidden but needs to be visible
+            is_managed = False
+            try:
+                self.main_split.index(self.right_sidebar)
+                is_managed = True
+            except tk.TclError:
+                is_managed = False
+            
+            if not is_managed:
                 self.main_split.add(self.right_sidebar, weight=1)
+
+        # 2. Manage the Panes inside (Glossary vs Find)
+        # First, unpack everything
+        self.glossary_frame.pack_forget()
+        self.find_pane.pack_forget()
+
+        if self.glossary_visible and self.find_visible:
+            # Both Visible: Glossary takes priority for expansion, Find at bottom
+            self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
+            self.find_pane.pack(side=BOTTOM, fill=X, padx=5, pady=5)
+        
+        elif self.glossary_visible:
+            # Only Glossary: Takes full space
+            self.glossary_frame.pack(fill=BOTH, expand=True, padx=5, pady=5)
+            
+        elif self.find_visible:
+            # Only Find: Takes full space (fixes the resizing issue)
+            self.find_pane.pack(fill=BOTH, expand=True, padx=5, pady=5)
     
     def toggle_glossary(self):
-        if self.glossary_visible:
-            self.glossary_frame.pack_forget(); self.btn_toggle_glossary.configure(bootstyle="info")
-        else:
-            self.glossary_frame.pack(side=TOP, fill=BOTH, expand=True, padx=5, pady=5)
-            self.btn_toggle_glossary.configure(bootstyle="info-outline")
         self.glossary_visible = not self.glossary_visible
+        if self.glossary_visible:
+            self.btn_toggle_glossary.configure(bootstyle="info-outline")
+        else:
+            self.btn_toggle_glossary.configure(bootstyle="info")
         self.update_sidebar_visibility()
 
     def toggle_find_replace(self):
-        if self.find_visible:
-            self.find_pane.pack_forget(); self.btn_toggle_find.configure(bootstyle="warning-outline")
-        else:
-            self.find_pane.pack(side=BOTTOM, fill=X, padx=5, pady=5)
-            self.btn_toggle_find.configure(bootstyle="warning")
         self.find_visible = not self.find_visible
+        if self.find_visible:
+            self.btn_toggle_find.configure(bootstyle="warning")
+        else:
+            self.btn_toggle_find.configure(bootstyle="warning-outline")
         self.update_sidebar_visibility()
 
     def open_find_replace_dialog(self):
         if not self.find_visible: self.toggle_find_replace()
 
-    # --- POPUP LOGIC (New Function Added) ---
+    # --- POPUP LOGIC ---
     def open_add_term_dialog(self):
         # Initializes the AddTermDialog with self as parent and the logic engine
         AddTermDialog(self, self.logic)
@@ -412,7 +441,6 @@ class EditorTab(ttk.Frame):
         try: w.insert(tk.INSERT, self.clipboard_get())
         except: pass
     
-    # --- RE-ADDED MISSING FILTER FUNCTION ---
     def apply_filter(self, event=None):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
