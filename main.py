@@ -10,10 +10,10 @@ class MainApp(ttk.Window):
     def __init__(self):
         super().__init__(themename="darkly") 
         self.title("Localization Toolkit")
-        self.geometry("1000x750")
+        # UPDATED: Larger default window size
+        self.geometry("1400x900")
 
         # --- SET ICON ---
-        # Look for the icon in the current folder (Standard method)
         if getattr(sys, 'frozen', False):
             app_path = Path(sys.executable).parent
         else:
@@ -29,21 +29,16 @@ class MainApp(ttk.Window):
         header.pack(fill='x')
         
         # RIGHT SIDE BUTTONS
-        # 1. Config Button (Far Right)
         ttk.Button(header, text="⚙ Config", command=self.open_config, bootstyle="secondary-outline").pack(side='right', padx=5)
-        
-        # 2. Help Button (Next to Config)
         ttk.Button(header, text="?", command=self.show_help, bootstyle="info-outline", width=3).pack(side='right', padx=5)
 
         # --- TABS ---
         self.notebook = ttk.Notebook(self, bootstyle="primary")
         self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
 
-        # Tab 1
         self.tab1 = ConverterTab(self.notebook)
         self.notebook.add(self.tab1, text="Converter Tools")
 
-        # Tab 2
         self.tab2 = EditorTab(self.notebook)
         self.notebook.add(self.tab2, text="XLIFF Editor")
 
