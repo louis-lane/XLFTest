@@ -18,10 +18,13 @@ class EditorTab(ttk.Frame):
         self.current_folder = None
         self.current_file = None
         self.file_map = {} 
-        self.glossary_data = [] 
+        self.glossary_data = []
+        
+        # State flags for toggles
+        self.sidebar_visible = True
+        self.glossary_visible = True
         
         # --- MAIN LAYOUT: 3 COLUMNS ---
-        # [Left Sidebar] | [Center Content] | [Right Sidebar]
         self.main_split = tk_ttk.PanedWindow(self, orient=HORIZONTAL)
         self.main_split.pack(fill=BOTH, expand=True, padx=5, pady=5)
 
@@ -49,6 +52,10 @@ class EditorTab(ttk.Frame):
         top_controls = ttk.Frame(self.content_area, padding=(0, 0, 0, 5))
         top_controls.pack(fill=X)
 
+        # Toggle Buttons (Left side of toolbar)
+        self.btn_toggle_sidebar = ttk.Button(top_controls, text="🗖 Files", command=self.toggle_sidebar, bootstyle="secondary-outline")
+        self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
+
         ttk.Label(top_controls, text="Search:").pack(side=LEFT, padx=(0, 5))
         self.search_var = tk.StringVar()
         self.search_entry = ttk.Entry(top_controls, textvariable=self.search_var, width=25)
@@ -61,6 +68,10 @@ class EditorTab(ttk.Frame):
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
+        # Right side of toolbar
+        self.btn_toggle_glossary = ttk.Button(top_controls, text="📖 Glossary", command=self.toggle_glossary, bootstyle="info-outline")
+        self.btn_toggle_glossary.pack(side=RIGHT, padx=(10, 0))
+        
         ttk.Button(top_controls, text="🔍 Find", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT)
 
         # --- CENTER SPLIT (Grid vs Edit Panel) ---
@@ -133,7 +144,6 @@ class EditorTab(ttk.Frame):
         self.right_sidebar = ttk.Frame(self.main_split)
         self.main_split.add(self.right_sidebar, weight=1)
 
-        # Glossary Pane
         self.glossary_frame = ttk.Labelframe(self.right_sidebar, text="Glossary / Term Base", padding=5, bootstyle="info")
         self.glossary_frame.pack(fill=BOTH, expand=True, padx=(0, 5), pady=5)
         
@@ -158,6 +168,25 @@ class EditorTab(ttk.Frame):
         
         self.setup_hotkeys()
         self.load_glossary_data()
+
+    # --- UI TOGGLE LOGIC ---
+    def toggle_sidebar(self):
+        if self.sidebar_visible:
+            self.main_split.forget(self.sidebar_frame)
+            self.btn_toggle_sidebar.configure(bootstyle="secondary") # Visual indicator off
+        else:
+            self.main_split.insert(0, self.sidebar_frame, weight=1)
+            self.btn_toggle_sidebar.configure(bootstyle="secondary-outline") # Visual indicator on
+        self.sidebar_visible = not self.sidebar_visible
+
+    def toggle_glossary(self):
+        if self.glossary_visible:
+            self.main_split.forget(self.right_sidebar)
+            self.btn_toggle_glossary.configure(bootstyle="info") 
+        else:
+            self.main_split.add(self.right_sidebar, weight=1)
+            self.btn_toggle_glossary.configure(bootstyle="info-outline")
+        self.glossary_visible = not self.glossary_visible
 
     # --- GLOSSARY LOGIC ---
     def load_glossary_data(self):
@@ -185,12 +214,10 @@ class EditorTab(ttk.Frame):
         source_lower = source_text.lower()
         
         for entry in self.glossary_data:
-            # Language Filter (Loose matching)
             if entry['lang'] and current_lang != "unknown":
                 if not current_lang.lower().startswith(entry['lang'].lower()): continue
 
             term = entry['source']
-            # Simple substring match
             if term.lower() in source_lower:
                 self.gloss_tree.insert("", "end", values=(term, entry['target']))
 
@@ -326,7 +353,6 @@ class EditorTab(ttk.Frame):
         try:
             self.xml_tree.write(self.current_file, encoding="UTF-8", xml_declaration=True, pretty_print=True)
             sel = self.tree.selection(); self.apply_filter()
-            # Try restore selection
             valid = [i for i in sel if self.tree.exists(i)]
             if valid: self.tree.selection_set(valid); self.on_row_select(None)
         except Exception as e: messagebox.showerror("Error", f"Failed to save: {e}")
@@ -399,7 +425,6 @@ class EditorTab(ttk.Frame):
 
         prog = ttk.Progressbar(d, mode='determinate'); prog.pack(fill=X, padx=10, pady=10)
         
-        # Simple Results Tree
         res_tree = ttk.Treeview(d, columns=("file", "id", "txt"), show="headings"); res_tree.pack(fill=BOTH, expand=True, padx=10)
         res_tree.heading("file", text="File"); res_tree.heading("id", text="ID"); res_tree.heading("txt", text="Text")
         
@@ -408,7 +433,6 @@ class EditorTab(ttk.Frame):
             if not sel: return
             item = res_tree.item(sel[0]); f = item['tags'][0]; tid = item['values'][1]
             if str(self.current_file) != str(f): self.load_file(f)
-            # Jump logic
             self.tree.selection_remove(self.tree.selection())
             for c in self.tree.get_children():
                 if str(self.tree.item(c, 'values')[0]) == str(tid):
