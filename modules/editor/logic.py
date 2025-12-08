@@ -62,6 +62,13 @@ class EditorLogic:
         except Exception as e:
             print(f"Glossary Error: {e}")
 
+    def extract_tags(self, text):
+        """Finds tags (e.g. <g id="1">) or variables ({name}) in text."""
+        if not text: return []
+        # Matches: <tag>, </tag>, {variable}, %s, %d
+        pattern = r"(<\/?[a-zA-Z0-9_\-]+[^>]*>|{[^}]+}|%[sd])"
+        return list(set(re.findall(pattern, text))) # Return unique tags
+
     def find_glossary_matches(self, source_text, current_file_path):
         """Returns a list of matching terms [(term, translation), ...]"""
         matches = []
