@@ -18,13 +18,10 @@ class ConverterTab(ttk.Frame):
     def build_ui(self):
         lc = ttk.Labelframe(self, text="1. Analysis & Setup", padding=10, bootstyle="info")
         lc.pack(fill=X, pady=5)
-        
-        col1 = ttk.Frame(lc)
-        col1.pack(fill=X)
+        col1 = ttk.Frame(lc); col1.pack(fill=X)
         self.glossary_label = ttk.Label(col1, text="No glossary loaded", foreground="orange")
         self.glossary_label.pack(side=LEFT, padx=5)
         ttk.Button(col1, text="Load Glossary", command=self.load_glossary, bootstyle="secondary-sm").pack(side=RIGHT)
-        
         ttk.Separator(lc, orient=HORIZONTAL).pack(fill=X, pady=10)
         ttk.Button(lc, text="Analyze Project Statistics", command=lambda: self.start_thread(self.run_analysis), bootstyle="info").pack(fill=X)
 
@@ -37,8 +34,7 @@ class ConverterTab(ttk.Frame):
         l2.pack(fill=X, pady=5)
         ttk.Button(l2, text="Reconstruct XLIFFs (Step 2)", command=lambda: self.start_thread(self.run_import), bootstyle="success").pack(fill=X)
 
-        self.status_frame = ttk.Frame(self)
-        self.status_frame.pack(side=BOTTOM, fill=X, pady=10)
+        self.status_frame = ttk.Frame(self); self.status_frame.pack(side=BOTTOM, fill=X, pady=10)
         self.progress = ttk.Progressbar(self.status_frame, mode='indeterminate', bootstyle="success-striped")
         self.status_label = ttk.Label(self.status_frame, text="Ready", font=("Helvetica", 9))
         self.status_label.pack(side=LEFT)
