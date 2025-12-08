@@ -5,7 +5,6 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-# --- IMPORT center_window ---
 from utils.shared import get_target_language, log_errors, CONFIG, center_window
 import shutil
 import re
@@ -527,14 +526,25 @@ class EditorTab(ttk.Frame):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
         
-        status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
+        # --- MAP STATUS TO ICON ---
+        status_map = {
+            'new': '🔴',
+            'needs-review': '🟠',
+            'translated': '🟢',
+            'final': '☑️'
+        }
         
         for rec in self.data_store:
             if status_filter != "all" and str(rec['status']).lower().replace(" ", "") != status_filter.replace(" ", ""): continue
             if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
+            
             tag = str(rec['status']).lower().replace(" ", "_")
+            
+            # Use icon if available, else first letter
             raw_status = str(rec['status']).lower()
             icon = status_map.get(raw_status, '❓')
+            
+            # REORDERED COLUMNS: ID, SOURCE, TARGET, STATUS(ICON)
             self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
             
         self.tree.tag_configure('new', foreground='#ff4d4d'); self.tree.tag_configure('needs_review', foreground='#ffad33')
