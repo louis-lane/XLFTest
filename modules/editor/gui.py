@@ -24,30 +24,40 @@ class EditorTab(ttk.Frame):
         self.glossary_visible = True
         self.admin_mode_active = False 
         
-        # --- 1. GLOBAL TOOLBAR (The "Ribbon") ---
-        # This sits above the 3-pane layout, spanning the full width
+        # --- 1. GLOBAL TOOLBAR (The New Ribbon) ---
         self.toolbar = ttk.Frame(self, padding=(5, 5))
         self.toolbar.pack(side=TOP, fill=X)
 
-        # Left Side of Toolbar (File Toggle)
-        self.btn_toggle_sidebar = ttk.Button(self.toolbar, text="🗖 Files", command=self.toggle_sidebar, bootstyle="secondary-outline")
-        self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 15))
+        # Left Side Controls
+        self.btn_toggle_sidebar = ttk.Button(self.toolbar, text="🗖", command=self.toggle_sidebar, bootstyle="secondary-outline", width=3)
+        self.btn_toggle_sidebar.pack(side=LEFT, padx=(0, 10))
+        
+        ttk.Button(self.toolbar, text="➜ Source", command=self.copy_source_to_target, bootstyle="link").pack(side=LEFT)
+        ttk.Button(self.toolbar, text="✖ Clear", command=self.clear_target, bootstyle="link").pack(side=LEFT)
+        ttk.Separator(self.toolbar, orient=VERTICAL).pack(side=LEFT, fill=Y, padx=10)
 
-        # Center of Toolbar (Search & Filter)
-        ttk.Label(self.toolbar, text="Search:").pack(side=LEFT, padx=(0, 5))
+        # Formatting Buttons
+        ttk.Button(self.toolbar, text="B", command=lambda: self.insert_tag("b"), bootstyle="secondary-outline", width=2).pack(side=LEFT, padx=2)
+        ttk.Button(self.toolbar, text="I", command=lambda: self.insert_tag("i"), bootstyle="secondary-outline", width=2).pack(side=LEFT, padx=2)
+        ttk.Button(self.toolbar, text="U", command=lambda: self.insert_tag("u"), bootstyle="secondary-outline", width=2).pack(side=LEFT, padx=2)
+        
+        # Center Filter Area
+        filter_frame = ttk.Frame(self.toolbar)
+        filter_frame.pack(side=LEFT, padx=20)
+
+        ttk.Label(filter_frame, text="Search:").pack(side=LEFT, padx=(0, 5))
         self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(self.toolbar, textvariable=self.search_var, width=30)
-        self.search_entry.pack(side=LEFT, padx=(0, 15))
+        self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_var, width=20)
+        self.search_entry.pack(side=LEFT, padx=(0, 10))
         self.search_entry.bind("<KeyRelease>", self.apply_filter)
 
-        ttk.Label(self.toolbar, text="Filter Status:").pack(side=LEFT, padx=(0, 5))
         self.filter_var = tk.StringVar(value="All")
-        self.filter_combo = ttk.Combobox(self.toolbar, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=15)
+        self.filter_combo = ttk.Combobox(filter_frame, textvariable=self.filter_var, values=("All", "New", "Needs Review", "Translated", "Final"), state="readonly", width=12)
         self.filter_combo.pack(side=LEFT)
         self.filter_combo.bind("<<ComboboxSelected>>", self.apply_filter)
 
-        # Right Side of Toolbar (Glossary Toggle & Find)
-        ttk.Button(self.toolbar, text="🔍 Find & Replace", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT, padx=5)
+        # Right Side Tools
+        ttk.Button(self.toolbar, text="🔍 Find", command=self.open_find_replace_dialog, bootstyle="warning-outline").pack(side=RIGHT, padx=5)
         self.btn_toggle_glossary = ttk.Button(self.toolbar, text="📖 Glossary", command=self.toggle_glossary, bootstyle="info-outline")
         self.btn_toggle_glossary.pack(side=RIGHT, padx=5)
 
@@ -75,7 +85,7 @@ class EditorTab(ttk.Frame):
         self.content_area = ttk.Frame(self.main_split)
         self.main_split.add(self.content_area, weight=4)
 
-        # --- CENTER SPLIT (Grid Top / Edit Bottom) ---
+        # --- CENTER SPLIT ---
         self.editor_split = tk_ttk.PanedWindow(self.content_area, orient=VERTICAL)
         self.editor_split.pack(fill=BOTH, expand=True)
         
@@ -83,12 +93,23 @@ class EditorTab(ttk.Frame):
         self.grid_frame = ttk.Frame(self.editor_split)
         self.editor_split.add(self.grid_frame, weight=3)
         
-        cols = ("id", "status", "source", "target")
+        # --- UPDATED COLUMNS CONFIGURATION ---
+        # Order: ID -> Source -> Target -> Status (Far Right)
+        cols = ("id", "source", "target", "status")
         self.tree = ttk.Treeview(self.grid_frame, columns=cols, show="headings", selectmode="extended") 
-        self.tree.heading("id", text="ID"); self.tree.column("id", width=50)
-        self.tree.heading("status", text="Status"); self.tree.column("status", width=90)
-        self.tree.heading("source", text="Original Source"); self.tree.column("source", width=300)
-        self.tree.heading("target", text="Translated Target"); self.tree.column("target", width=300)
+        
+        self.tree.heading("id", text="ID")
+        self.tree.column("id", width=50, stretch=False)
+        
+        self.tree.heading("source", text="Original Source")
+        self.tree.column("source", width=300)
+        
+        self.tree.heading("target", text="Translation Target")
+        self.tree.column("target", width=300)
+        
+        # Status Column (Narrow, Centered, Icon)
+        self.tree.heading("status", text="St")
+        self.tree.column("status", width=40, anchor="center", stretch=False)
         
         grid_scroll = ttk.Scrollbar(self.grid_frame, orient=VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=grid_scroll.set)
@@ -104,30 +125,21 @@ class EditorTab(ttk.Frame):
         self.edit_panel = ttk.Labelframe(self.editor_split, text="Edit Segment", padding=10, bootstyle="secondary")
         self.editor_split.add(self.edit_panel, weight=2)
         
-        # 1. CONTROL HEADER (Moved from Bottom to Top of Edit Panel)
-        # This creates a "Toolbar" for the specific editor box, similar to Smartcat
         controls_header = ttk.Frame(self.edit_panel)
         controls_header.pack(side=TOP, fill=X, pady=(0, 10))
 
-        # Status Dropdown
         ttk.Label(controls_header, text="Set Status:").pack(side=LEFT, padx=(0, 5))
         self.edit_status_var = tk.StringVar()
         self.status_dropdown = ttk.Combobox(controls_header, textvariable=self.edit_status_var, values=("new", "needs-review", "translated", "final"), state="readonly", width=15)
         self.status_dropdown.pack(side=LEFT)
 
-        # Navigation & Save
         btn_nav_frame = ttk.Frame(controls_header)
         btn_nav_frame.pack(side=RIGHT)
-        
-        # Hotkey Hint
         ttk.Label(btn_nav_frame, text="[Ctrl+Enter to Save]", font=("Helvetica", 8), foreground="gray").pack(side=LEFT, padx=10)
-        
         ttk.Button(btn_nav_frame, text="<", command=lambda: self.navigate_grid(-1), bootstyle="secondary-outline", width=3).pack(side=LEFT, padx=2)
         ttk.Button(btn_nav_frame, text=">", command=lambda: self.navigate_grid(1), bootstyle="secondary-outline", width=3).pack(side=LEFT, padx=2)
         ttk.Button(btn_nav_frame, text="Save & Next", command=self.save_and_next, bootstyle="success").pack(side=LEFT, padx=(10, 0))
 
-        # 2. TEXT AREAS
-        # Source
         ttk.Label(self.edit_panel, text="Original Source:", font=("Helvetica", 9, "bold"), bootstyle="inverse-secondary").pack(anchor=W)
         src_frame = ttk.Frame(self.edit_panel)
         src_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
@@ -138,12 +150,11 @@ class EditorTab(ttk.Frame):
         self.txt_source.pack(side=LEFT, fill=BOTH, expand=True)
         self.txt_source.bind("<Button-3>", self.show_source_menu)
         
-        # Target
         ttk.Label(self.edit_panel, text="Translation Target:", font=("Helvetica", 9, "bold"), bootstyle="inverse-secondary").pack(anchor=W)
         tgt_frame = ttk.Frame(self.edit_panel)
         tgt_frame.pack(fill=BOTH, expand=True, pady=(0, 5))
         tgt_scroll = ttk.Scrollbar(tgt_frame, orient=VERTICAL)
-        self.txt_target = tk.Text(tgt_frame, height=4, bg="white", fg="black", insertbackground="black", wrap="word", yscrollcommand=tgt_scroll.set)
+        self.txt_target = tk.Text(tgt_frame, height=4, bg="white", fg="black", insertbackground="black", wrap="word", undo=True, yscrollcommand=tgt_scroll.set)
         tgt_scroll.config(command=self.txt_target.yview)
         tgt_scroll.pack(side=RIGHT, fill=Y)
         self.txt_target.pack(side=LEFT, fill=BOTH, expand=True)
@@ -167,12 +178,9 @@ class EditorTab(ttk.Frame):
         self.gloss_tree.pack(fill=BOTH, expand=True)
         self.gloss_tree.bind("<Double-1>", self.insert_glossary_term)
         
-        # GLOSSARY CONTROLS
         self.gloss_ctrl_frame = ttk.Frame(self.glossary_frame)
         self.gloss_ctrl_frame.pack(side=BOTTOM, fill=X, pady=5)
         ttk.Label(self.gloss_ctrl_frame, text="Double-click to insert", font=("Helvetica", 7), foreground="gray").pack(side=LEFT)
-        
-        # Admin Button
         self.btn_add_term = ttk.Button(self.gloss_ctrl_frame, text="+ Add Term", command=self.open_add_term_dialog, bootstyle="info-outline-sm")
 
         self.xml_tree = None
@@ -182,6 +190,25 @@ class EditorTab(ttk.Frame):
         self.setup_hotkeys()
         self.load_glossary_data()
 
+    # --- FORMATTING HELPERS ---
+    def insert_tag(self, tag):
+        try:
+            if not self.txt_target.tag_ranges("sel"):
+                self.txt_target.insert(tk.INSERT, f"<{tag}></{tag}>")
+                self.txt_target.mark_set(tk.INSERT, f"insert - {len(tag)+3}c")
+            else:
+                sel_first = self.txt_target.index("sel.first")
+                sel_last = self.txt_target.index("sel.last")
+                text = self.txt_target.get(sel_first, sel_last)
+                self.txt_target.delete(sel_first, sel_last)
+                self.txt_target.insert(sel_first, f"<{tag}>{text}</{tag}>")
+        except: pass
+        self.txt_target.focus_set()
+
+    def clear_target(self):
+        self.txt_target.delete("1.0", END)
+        self.txt_target.focus_set()
+
     # --- TOGGLE ADMIN MODE ---
     def toggle_admin_mode(self, event=None):
         if self.admin_mode_active:
@@ -190,7 +217,6 @@ class EditorTab(ttk.Frame):
         else:
             self.btn_add_term.pack(side=RIGHT)
             messagebox.showinfo("Admin Mode", "Admin Mode Activated\n\n'Add Term' button is now visible.")
-        
         self.admin_mode_active = not self.admin_mode_active
 
     # --- GLOSSARY EDITOR LOGIC ---
@@ -198,7 +224,6 @@ class EditorTab(ttk.Frame):
         d = ttk.Toplevel(self)
         d.title("Add Glossary Term")
         d.geometry("500x550") 
-        
         main_frame = ttk.Frame(d, padding=20)
         main_frame.pack(fill=BOTH, expand=True)
         
@@ -215,18 +240,14 @@ class EditorTab(ttk.Frame):
         e_tgt = ttk.Entry(main_frame, width=40)
         e_tgt.pack(fill=X, pady=(0, 15))
         
-        # --- SEARCHABLE LANGUAGE DROPDOWN ---
         ttk.Label(main_frame, text="Language Code:", font=("Helvetica", 10, "bold"), bootstyle="info").pack(anchor=W, pady=(0, 5))
-        
         all_langs = CONFIG.get("protected_languages", [])
         default_lang = ""
         if self.current_file: default_lang = get_target_language(self.current_file)
-        
         c_lang = ttk.Combobox(main_frame, values=all_langs, width=38)
         c_lang.pack(fill=X, pady=(0, 15))
         c_lang.set(default_lang)
 
-        # --- AUTO-OPEN & FILTER LOGIC ---
         def filter_lang_options(event):
             if event.keysym in ['Up', 'Down', 'Return', 'Left', 'Right', 'Tab', 'Shift_L', 'Shift_R', 'Control_L', 'Control_R', 'Alt_L', 'Alt_R']: return
             typed = c_lang.get()
@@ -237,32 +258,20 @@ class EditorTab(ttk.Frame):
             try:
                 if c_lang['values']: c_lang.tk.call('ttk::combobox::Post', c_lang._w)
             except: pass
-
         c_lang.bind('<KeyRelease>', filter_lang_options)
 
         adv_frame = ttk.Labelframe(main_frame, text="Advanced Settings", padding=10, bootstyle="secondary")
         adv_frame.pack(fill=X, pady=(5, 10))
-
-        r1 = ttk.Frame(adv_frame)
-        r1.pack(fill=X, pady=5)
-        
+        r1 = ttk.Frame(adv_frame); r1.pack(fill=X, pady=5)
         ttk.Label(r1, text="Match Type:").pack(side=LEFT)
         match_var = tk.StringVar(value="partial")
         c_match = ttk.Combobox(r1, textvariable=match_var, values=("partial", "exact", "regex"), state="readonly", width=10)
         c_match.pack(side=LEFT, padx=(5, 15))
-
         ttk.Label(r1, text="Context:").pack(side=LEFT)
-        e_context = ttk.Entry(r1, width=15)
-        e_context.pack(side=LEFT, padx=5, fill=X, expand=True)
-
-        r2 = ttk.Frame(adv_frame)
-        r2.pack(fill=X, pady=5)
-        
-        case_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(r2, text="Case Sensitive", variable=case_var).pack(side=LEFT, padx=(0, 15))
-        
-        forbidden_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(r2, text="Mark as Forbidden", variable=forbidden_var).pack(side=LEFT)
+        e_context = ttk.Entry(r1, width=15); e_context.pack(side=LEFT, padx=5, fill=X, expand=True)
+        r2 = ttk.Frame(adv_frame); r2.pack(fill=X, pady=5)
+        case_var = tk.BooleanVar(value=False); ttk.Checkbutton(r2, text="Case Sensitive", variable=case_var).pack(side=LEFT, padx=(0, 15))
+        forbidden_var = tk.BooleanVar(value=False); ttk.Checkbutton(r2, text="Mark as Forbidden", variable=forbidden_var).pack(side=LEFT)
 
         if initial_source: e_tgt.focus_set() 
         else: e_src.focus_set()
@@ -270,29 +279,17 @@ class EditorTab(ttk.Frame):
         def save_term():
             s, t, l = e_src.get().strip(), e_tgt.get().strip(), c_lang.get().strip()
             if not s or not t: messagebox.showwarning("Missing Data", "Source and Target are required."); return
-            
             for entry in self.glossary_data:
                 if entry['source'].lower() == s.lower() and entry['lang'] == l:
                     if not messagebox.askyesno("Duplicate", "Term exists. Add duplicate?"): return
-            
             g_path = Path("glossary.xlsx")
-            new_row = {
-                "source_text": s, 
-                "target_text": t, 
-                "language_code": l,
-                "match_type": match_var.get(),
-                "case_sensitive": str(case_var.get()).upper(),
-                "context": e_context.get().strip(),
-                "is_forbidden": str(forbidden_var.get()).upper()
-            }
-            
+            new_row = {"source_text": s, "target_text": t, "language_code": l, "match_type": match_var.get(),
+                "case_sensitive": str(case_var.get()).upper(), "context": e_context.get().strip(), "is_forbidden": str(forbidden_var.get()).upper()}
             try:
                 if g_path.exists():
                     df = pd.read_excel(g_path).fillna("")
                     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                else:
-                    df = pd.DataFrame([new_row])
-                
+                else: df = pd.DataFrame([new_row])
                 df.to_excel(g_path, index=False)
                 messagebox.showinfo("Success", "Term added.")
                 self.load_glossary_data() 
@@ -345,15 +342,12 @@ class EditorTab(ttk.Frame):
         current_lang = "unknown"
         if self.current_file: current_lang = get_target_language(self.current_file)
         source_lower = source_text.lower()
-        
         for entry in self.glossary_data:
             if entry['is_forbidden']: continue 
             if entry['lang'] and current_lang != "unknown":
                 if not current_lang.lower().startswith(entry['lang'].lower()): continue
-            
             term = entry['source']
             match = False
-            
             if entry['match_type'] == 'exact':
                 if entry['case_sensitive']: match = (term == source_text)
                 else: match = (term.lower() == source_lower)
@@ -365,9 +359,7 @@ class EditorTab(ttk.Frame):
             else: 
                 if entry['case_sensitive']: match = (term in source_text)
                 else: match = (term.lower() in source_lower)
-
-            if match: 
-                self.gloss_tree.insert("", "end", values=(term, entry['target']))
+            if match: self.gloss_tree.insert("", "end", values=(term, entry['target']))
 
     def insert_glossary_term(self, event):
         sel = self.gloss_tree.selection()
@@ -394,19 +386,14 @@ class EditorTab(ttk.Frame):
         current_selection = self.tree.selection()
         all_items = self.tree.get_children()
         if not all_items: return
-        
-        if not current_selection:
-            new_index = 0
+        if not current_selection: new_index = 0
         else:
             try: new_index = all_items.index(current_selection[0]) + direction
             except ValueError: new_index = 0
-        
         if 0 <= new_index < len(all_items):
             new_item = all_items[new_index]
-            self.tree.selection_set(new_item)
-            self.tree.see(new_item)
-            self.on_row_select(None)
-            self.txt_target.focus_set()
+            self.tree.selection_set(new_item); self.tree.see(new_item)
+            self.on_row_select(None); self.txt_target.focus_set()
             return "break"
 
     def save_and_next(self):
@@ -416,21 +403,13 @@ class EditorTab(ttk.Frame):
             all_items = self.tree.get_children()
             try:
                 curr_idx = all_items.index(current_sel[0])
-                if curr_idx + 1 < len(all_items):
-                    next_iid = all_items[curr_idx + 1]
-                    next_id_to_select = self.tree.item(next_iid, 'values')[0]
+                if curr_idx + 1 < len(all_items): next_id_to_select = self.tree.item(all_items[curr_idx + 1], 'values')[0]
             except ValueError: pass
-
         self.save_segment() 
-        
         if next_id_to_select:
             for child in self.tree.get_children():
                 if str(self.tree.item(child, 'values')[0]) == str(next_id_to_select):
-                    self.tree.selection_set(child)
-                    self.tree.see(child)
-                    self.on_row_select(None)
-                    self.txt_target.focus_set()
-                    break
+                    self.tree.selection_set(child); self.tree.see(child); self.on_row_select(None); self.txt_target.focus_set(); break
         return "break"
 
     def copy_source_to_clipboard(self): src = self.txt_source.get("1.0", "end-1c"); self.clipboard_clear(); self.clipboard_append(src); return "break"
@@ -478,11 +457,28 @@ class EditorTab(ttk.Frame):
     def apply_filter(self, event=None):
         for i in self.tree.get_children(): self.tree.delete(i)
         status_filter = self.filter_var.get().lower(); search = self.search_var.get().lower()
+        
+        # --- MAP STATUS TO ICON ---
+        status_map = {
+            'new': '🔴',
+            'needs-review': '🟠',
+            'translated': '🟢',
+            'final': '☑️'
+        }
+        
         for rec in self.data_store:
             if status_filter != "all" and str(rec['status']).lower().replace(" ", "") != status_filter.replace(" ", ""): continue
             if search and (search not in str(rec['source']).lower() and search not in str(rec['target']).lower() and search not in str(rec['id']).lower()): continue
+            
             tag = str(rec['status']).lower().replace(" ", "_")
-            self.tree.insert("", "end", values=(rec['id'], rec['status'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' ')), tags=(tag,))
+            
+            # Use icon if available, else first letter
+            raw_status = str(rec['status']).lower()
+            icon = status_map.get(raw_status, '❓')
+            
+            # REORDERED COLUMNS: ID, SOURCE, TARGET, STATUS(ICON)
+            self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
+            
         self.tree.tag_configure('new', foreground='#ff4d4d'); self.tree.tag_configure('needs_review', foreground='#ffad33')
         self.tree.tag_configure('translated', foreground='#33cc33'); self.tree.tag_configure('final', foreground='#3399ff')
 
@@ -553,6 +549,15 @@ class EditorTab(ttk.Frame):
             uid = self.tree.item(i, 'values')[0]; rec = next((x for x in self.data_store if str(x['id']) == str(uid)), None)
             if rec: self._update_single_record(rec, rec['target'], st)
         self._save_and_refresh()
+    def copy_source_to_target(self):
+        # Specific handler for the toolbar button (acting on single edit or multi)
+        if self.tree.selection():
+            self.copy_source_to_target() # Use existing loop
+        elif self.current_edit_id:
+            rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
+            if rec: 
+                self.txt_target.delete("1.0", END)
+                self.txt_target.insert("1.0", rec['source'])
 
     def open_find_replace_dialog(self):
         if not self.current_folder: messagebox.showwarning("Warning", "Open project first."); return
