@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
-from utils.shared import get_target_language
+# UPDATED IMPORT
+from utils.core import get_target_language
 
 def load_glossary_dataframe(glossary_path):
     """Safely loads the glossary Excel file into a DataFrame."""
