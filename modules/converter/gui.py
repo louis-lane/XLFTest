@@ -75,14 +75,24 @@ class ConverterTab(ttk.Frame):
     def run_apply_deepl(self):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
         if not root_dir: return
-        def worker():
+
+        deepl_dir = filedialog.askdirectory(title="Select Folder with DeepL Files")
+        if not deepl_dir: return
+            
+       def worker():
             try:
-                updated, total, errors = apply_deepl_translations(Path(root_dir))
+                # Pass both paths to the logic function
+                updated, total, errors = apply_deepl_translations(Path(root_dir), Path(deepl_dir))
+                
                 msg = f"Updated {updated}/{total} files."
-                if errors: msg += " Check error_log.txt."
+                if errors: 
+                    log_errors(Path(root_dir), errors) # Ensure log_errors is imported/available
+                    msg += " Check logs."
                 messagebox.showinfo("Result", msg)
-            except Exception as e: messagebox.showerror("Error", str(e))
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
         self.start_thread(worker)
+
 
     def run_export(self):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
@@ -162,3 +172,4 @@ class ConverterTab(ttk.Frame):
                 f.write("".join(str(v).ljust(w) for v, w in zip(total_values, widths)) + "\n")
             messagebox.showinfo("Success", f"Report successfully saved to:\n{filepath}")
         except Exception as e: messagebox.showerror("Export Error", f"Could not save the report: {e}")
+
