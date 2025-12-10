@@ -185,6 +185,9 @@ class EditorTab(ttk.Frame):
         ttk.Label(self.edit_panel, text="Target:", bootstyle="inverse-secondary").pack(anchor=W)
         self.txt_target = tk.Text(self.edit_panel, height=4, undo=True, maxundo=50, wrap="word")
         self.txt_target.pack(fill=BOTH, expand=True)
+        # NEW: Configure Tag Style
+        self.txt_target.tag_configure("tag_highlight", foreground="#00bfff") # Same blue as cursor
+        
         self.txt_target.bind("<Button-3>", self.show_target_menu)
         
         # --- DRAG AND DROP & SELECTION BINDINGS ---
@@ -210,6 +213,21 @@ class EditorTab(ttk.Frame):
         self.btn_add_term.pack(side=RIGHT)
 
         self.find_pane = FindReplacePane(self.right_sidebar, self)
+
+    # --- SYNTAX HIGHLIGHTING (New) ---
+    def highlight_syntax(self) -> None:
+        """Applies blue highlighting to all tags in the target text."""
+        self.txt_target.tag_remove("tag_highlight", "1.0", END)
+        
+        mode = self.tag_syntax_var.get()
+        pattern = self.logic.get_tag_pattern(mode)
+        
+        text_content = self.txt_target.get("1.0", "end-1c")
+        
+        for match in re.finditer(pattern, text_content):
+            start_index = f"1.0 + {match.start()} chars"
+            end_index = f"1.0 + {match.end()} chars"
+            self.txt_target.tag_add("tag_highlight", start_index, end_index)
 
     # --- DRAG & DROP LOGIC ---
     def get_tag_at_index(self, index: str) -> Optional[Tuple[str, str, str]]:
@@ -319,6 +337,9 @@ class EditorTab(ttk.Frame):
             
             self.segment_dirty = True
             self.dragging_tag = False
+            
+            # Re-apply syntax highlighting immediately after move
+            self.highlight_syntax()
             
             # Clear selection
             self.txt_target.tag_remove("sel", "1.0", END)
@@ -430,7 +451,9 @@ class EditorTab(ttk.Frame):
 
     # --- TAG LOGIC ---
     def on_syntax_change(self, event: Any) -> None:
-        pass
+        # Trigger highlighting when syntax mode changes
+        if self.current_edit_id:
+            self.highlight_syntax()
 
     def show_tag_grid_popup(self) -> None:
         """Creates a compact 4-column grid popup for inserting tags."""
@@ -514,6 +537,10 @@ class EditorTab(ttk.Frame):
                     self.txt_target.tag_add("sel", sel_first, f"{sel_first} + {len(inner)}c")
                 else:
                     self.txt_target.delete(sel_first, sel_last); self.txt_target.insert(sel_first, f"{opener}{text}{closer}")
+            
+            # Apply highlighting after insert
+            self.highlight_syntax()
+            
         except: pass
         self.txt_target.focus_set()
 
@@ -527,6 +554,8 @@ class EditorTab(ttk.Frame):
         if event.keysym in ("Up", "Down", "Left", "Right", "Control_L", "Control_R", "Alt_L", "Alt_R", "Shift_L", "Shift_R"):
             return
         self.segment_dirty = True
+        # Re-apply highlighting as user types
+        self.highlight_syntax()
 
     def check_unsaved_changes(self) -> bool:
         if self.segment_dirty:
@@ -606,6 +635,9 @@ class EditorTab(ttk.Frame):
             self.edit_status_var.set(rec['status'])
             self.refresh_glossary_view(rec['source'])
             self.segment_dirty = False 
+            
+            # Apply highlighting to loaded text
+            self.highlight_syntax()
 
     def refresh_glossary_view(self, source_text: str) -> None:
         for i in self.gloss_tree.get_children(): self.gloss_tree.delete(i)
@@ -621,6 +653,7 @@ class EditorTab(ttk.Frame):
         except: pass
         self.txt_target.insert(tk.INSERT, translation)
         self.segment_dirty = True
+        self.highlight_syntax()
 
     def save_segment(self) -> None:
         if not self.current_edit_id: return
