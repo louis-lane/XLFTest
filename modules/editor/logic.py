@@ -93,6 +93,7 @@ class EditorLogic:
     def extract_tags(self, text: str, syntax_mode: str = "Standard XML <>") -> List[str]:
         """
         Identifies and extracts markup tags from the source text.
+        Used to populate the 'Insert Tag' menu.
         """
         if not text: return []
         
