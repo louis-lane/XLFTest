@@ -2,6 +2,7 @@ import pandas as pd
 from lxml import etree
 from pathlib import Path
 from utils.shared import get_target_language
+from utils.glossary import load_glossary_as_list, find_glossary_matches
 import re
 
 class EditorLogic:
@@ -34,50 +35,12 @@ class EditorLogic:
         tree.write(path, encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
     def load_glossary(self, path="glossary.xlsx"):
-        self.glossary_data = []
-        if not Path(path).exists(): return
-        
-        try:
-            df = pd.read_excel(path).fillna("")
-            for _, row in df.iterrows():
-                if str(row.get('source_text', '')).strip() and str(row.get('target_text', '')).strip():
-                    self.glossary_data.append({
-                        "source": str(row['source_text']).strip(),
-                        "target": str(row['target_text']).strip(),
-                        "lang": str(row.get('language_code', '')).strip(),
-                        "match_type": str(row.get('match_type', 'partial')).strip(),
-                        "case_sensitive": str(row.get('case_sensitive', 'FALSE')).strip().upper() == 'TRUE',
-                        "context": str(row.get('context', '')).strip(),
-                        "is_forbidden": str(row.get('is_forbidden', 'FALSE')).strip().upper() == 'TRUE'
-                    })
-        except Exception as e: print(f"Glossary Error: {e}")
+        # REFACTORED: Delegated to utils/glossary.py
+        self.glossary_data = load_glossary_as_list(path)
 
     def find_glossary_matches(self, source_text, current_file_path):
-        matches = []
-        if not self.glossary_data or not source_text: return matches
-
-        current_lang = "unknown"
-        if current_file_path: current_lang = get_target_language(current_file_path)
-        source_lower = source_text.lower()
-
-        for entry in self.glossary_data:
-            if entry['is_forbidden']: continue
-            if entry['lang'] and current_lang != "unknown":
-                if not current_lang.lower().startswith(entry['lang'].lower()): continue
-
-            term = entry['source']
-            is_match = False
-            
-            if entry['match_type'] == 'exact':
-                if entry['case_sensitive']: is_match = (term == source_text)
-                else: is_match = (term.lower() == source_lower)
-            else: 
-                if entry['case_sensitive']: is_match = (term in source_text)
-                else: is_match = (term.lower() in source_lower)
-
-            if is_match: matches.append((term, entry['target']))
-        
-        return matches
+        # REFACTORED: Delegated to utils/glossary.py
+        return find_glossary_matches(source_text, current_file_path, self.glossary_data)
 
     def extract_tags(self, text, syntax_mode="Standard XML <>"):
         if not text: return []
