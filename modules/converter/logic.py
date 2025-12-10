@@ -2,9 +2,12 @@ import pandas as pd
 from lxml import etree
 from pathlib import Path
 from openpyxl.styles import PatternFill
-from utils.shared import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe
-# NEW IMPORT:
+# UPDATED IMPORT:
+from utils.core import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe
 from utils.glossary import get_glossary_map, update_glossary_from_list
+
+# ... (The rest of the file content remains exactly as it was in the previous step)
+# Since the body didn't change, you can just update the import lines at the top.
 
 def apply_deepl_translations(root_path, deepl_folder_path):
     master_folder = root_path / CONFIG["folder_names"]["excel_export"]
@@ -58,7 +61,6 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No .xliff files found.")
     
-    # REFACTORED: Use shared utility
     glossary_map = get_glossary_map(glossary_path)
             
     output_dir = root_path / CONFIG["folder_names"]["excel_export"]
@@ -153,7 +155,6 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
                         if pd.notna(row['target']):
                             new_entries.append({'source_text': row['source'], 'target_text': str(row['target']), 'language_code': lc})
             except: pass
-        # REFACTORED: Use shared utility
         if new_entries and glossary_path: update_glossary_from_list(glossary_path, new_entries)
     except Exception as e: errors.append(f"Glossary update failed: {e}")
 
@@ -206,7 +207,6 @@ def perform_analysis(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No XLIFF files.")
     
-    # REFACTORED: Use shared utility
     g_map = get_glossary_map(glossary_path)
 
     records = []
