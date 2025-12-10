@@ -38,8 +38,10 @@ class EditorTab(ttk.Frame):
         self.admin_mode_active: bool = False
         self.segment_dirty: bool = False
         
-        # Drag & Drop State (Phase 3)
+        # Drag & Drop State
+        self.dragging_tag: bool = False
         self.drag_start_index: Optional[str] = None
+        self.drag_end_index: Optional[str] = None
         self.dragged_tag_text: Optional[str] = None
         
         self.setup_ui()
@@ -179,8 +181,11 @@ class EditorTab(ttk.Frame):
         self.txt_target = tk.Text(self.edit_panel, height=4, undo=True, maxundo=50, wrap="word")
         self.txt_target.pack(fill=BOTH, expand=True)
         self.txt_target.bind("<Button-3>", self.show_target_menu)
-        # Bindings for selection and dragging
-        self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
+        
+        # --- DRAG AND DROP BINDINGS ---
+        self.txt_target.bind("<Button-1>", self.on_target_click)
+        self.txt_target.bind("<B1-Motion>", self.on_target_drag)
+        self.txt_target.bind("<ButtonRelease-1>", self.on_target_release)
         self.txt_target.bind("<KeyRelease>", self.on_text_modified)
 
         # 3. RIGHT SIDEBAR
@@ -200,35 +205,76 @@ class EditorTab(ttk.Frame):
 
         self.find_pane = FindReplacePane(self.right_sidebar, self)
 
-    # --- DRAG & DROP HELPERS (New) ---
+    # --- DRAG & DROP LOGIC ---
     def get_tag_at_index(self, index: str) -> Optional[Tuple[str, str, str]]:
-        """
-        Checks if the given text index (e.g. '1.5') falls within a tag.
-        Returns: (tag_text, start_index, end_index) or None.
-        """
+        """Checks if the given index falls within a tag. Returns (text, start, end)."""
         try:
             line_num = index.split('.')[0]
-            line_start = f"{line_num}.0"
-            line_end = f"{line_num}.end"
-            line_text = self.txt_target.get(line_start, line_end)
-            
-            # Simple column parsing (assuming no embedded objects)
+            line_text = self.txt_target.get(f"{line_num}.0", f"{line_num}.end")
             col = int(index.split('.')[1])
             
-            # Get the regex for current mode
             mode = self.tag_syntax_var.get()
             pattern = self.logic.get_tag_pattern(mode)
             
-            # Scan line for tags
             for match in re.finditer(pattern, line_text):
                 start, end = match.span()
-                # Check if cursor is inside this tag's range
                 if start <= col < end:
                     return (match.group(), f"{line_num}.{start}", f"{line_num}.{end}")
-            
             return None
         except Exception:
             return None
+
+    def on_target_click(self, event: Any) -> Any:
+        # Check if we clicked on a tag
+        index = self.txt_target.index(f"@{event.x},{event.y}")
+        tag_info = self.get_tag_at_index(index)
+        
+        if tag_info:
+            self.dragging_tag = True
+            self.dragged_tag_text, self.drag_start_index, self.drag_end_index = tag_info
+            
+            # Select the tag visually
+            self.txt_target.tag_remove("sel", "1.0", END)
+            self.txt_target.tag_add("sel", self.drag_start_index, self.drag_end_index)
+            
+            # Prevent default cursor placement so we can drag
+            return "break"
+        
+        self.dragging_tag = False
+        return None
+
+    def on_target_drag(self, event: Any) -> Any:
+        if self.dragging_tag:
+            # Move insertion cursor to follow mouse
+            self.txt_target.mark_set("insert", f"@{event.x},{event.y}")
+            # Ensure the selection stays on the tag we are dragging
+            if self.drag_start_index and self.drag_end_index:
+                self.txt_target.tag_remove("sel", "1.0", END)
+                self.txt_target.tag_add("sel", self.drag_start_index, self.drag_end_index)
+            return "break"
+        return None
+
+    def on_target_release(self, event: Any) -> Any:
+        if self.dragging_tag:
+            drop_index = self.txt_target.index(f"@{event.x},{event.y}")
+            
+            # Prevent dropping inside itself
+            if self.txt_target.compare(drop_index, ">=", self.drag_start_index) and \
+               self.txt_target.compare(drop_index, "<=", self.drag_end_index):
+                self.dragging_tag = False
+                return "break"
+
+            # Perform Move
+            self.txt_target.delete(self.drag_start_index, self.drag_end_index)
+            self.txt_target.insert(drop_index, self.dragged_tag_text)
+            
+            self.segment_dirty = True
+            self.dragging_tag = False
+            
+            # Clear selection
+            self.txt_target.tag_remove("sel", "1.0", END)
+            return "break"
+        return None
 
     # --- LAYOUT LOGIC ---
     def toggle_sidebar(self) -> None:
@@ -291,6 +337,7 @@ class EditorTab(ttk.Frame):
 
     def show_tag_grid_popup(self) -> None:
         """Creates a compact 4-column grid popup for inserting tags."""
+        # 1. Get Data
         syntax = self.tag_syntax_var.get()
         source_text = ""
         if self.current_edit_id:
@@ -305,19 +352,23 @@ class EditorTab(ttk.Frame):
             messagebox.showinfo("Tags", "No tags available for this segment.")
             return
 
+        # 2. Create Popup
         popup = tk.Toplevel(self)
-        popup.overrideredirect(True)
+        popup.overrideredirect(True) # Removes window border
         popup.attributes('-topmost', True)
         
+        # Position logic (Anchored to Button)
         x = self.btn_tags.winfo_rootx()
         y = self.btn_tags.winfo_rooty() + self.btn_tags.winfo_height()
         popup.geometry(f"+{x}+{y}")
         
+        # Close when clicking away
         def close_popup(e):
             if str(e.widget) != str(popup): popup.destroy()
         popup.bind("<FocusOut>", lambda e: popup.destroy())
         popup.focus_set()
 
+        # 3. Build Grid
         frame = ttk.Frame(popup, padding=5, bootstyle="dark")
         frame.pack(fill=BOTH, expand=True)
         
@@ -327,6 +378,7 @@ class EditorTab(ttk.Frame):
 
         current_row = 0
         
+        # Standard Tags
         if standard:
             ttk.Label(frame, text="Standard", font=("Helvetica", 8, "bold"), bootstyle="inverse-dark").grid(row=current_row, column=0, columnspan=4, sticky="w", pady=(0, 2))
             current_row += 1
@@ -334,6 +386,7 @@ class EditorTab(ttk.Frame):
                 add_tag_btn(frame, tag, current_row + (i // 4), i % 4)
             current_row += (len(standard) // 4) + 1
 
+        # Context Tags
         if context:
             if standard: 
                 ttk.Separator(frame, orient=HORIZONTAL).grid(row=current_row, column=0, columnspan=4, sticky="ew", pady=5)
@@ -371,38 +424,6 @@ class EditorTab(ttk.Frame):
         syntax = self.tag_syntax_var.get()
         opener = f"[{tag_type}]" if syntax == "Gomo []" else f"<{tag_type}>"
         self.insert_smart_tag(opener)
-
-    def on_target_click(self, event: Any) -> None:
-        try:
-            index = self.txt_target.index(f"@{event.x},{event.y}")
-            line_start = f"{index.split('.')[0]}.0"
-            line_text = self.txt_target.get(line_start, f"{line_start} lineend")
-            char_offset = int(index.split('.')[1])
-            mode = self.tag_syntax_var.get()
-            pattern = r"\[/?[a-zA-Z0-9_\-]+[^\]]*\]" if mode == "Gomo []" else r"</?[a-zA-Z0-9]+[^>]*>"
-            open_char = '[' if mode == "Gomo []" else '<'
-            close_char = ']' if mode == "Gomo []" else '>'
-            tags = re.finditer(pattern, line_text)
-            clicked_tag = None; tag_start = None; tag_end = None
-            for match in tags:
-                s, e = match.span()
-                if s <= char_offset <= e: clicked_tag = match.group(); tag_start = s; tag_end = e; break
-            if clicked_tag:
-                is_closing = clicked_tag.startswith(f"{open_char}/")
-                clean_content = re.sub(r"[\[\]<>/]", "", clicked_tag).split(" ")[0]
-                start_sel = None; end_sel = None
-                if not is_closing:
-                    rest_of_line = line_text[tag_end:]
-                    closer = f"{open_char}/{clean_content}{close_char}"
-                    close_idx = rest_of_line.find(closer)
-                    if close_idx != -1: start_sel = f"{index.split('.')[0]}.{tag_start}"; end_sel = f"{index.split('.')[0]}.{tag_end + close_idx + len(closer)}"
-                else:
-                    prev_line = line_text[:tag_start]
-                    opener_base = f"{open_char}{clean_content}"
-                    open_idx = prev_line.rfind(opener_base)
-                    if open_idx != -1: start_sel = f"{index.split('.')[0]}.{open_idx}"; end_sel = f"{index.split('.')[0]}.{tag_end}"
-                if start_sel and end_sel: self.txt_target.tag_remove("sel", "1.0", END); self.txt_target.tag_add("sel", start_sel, end_sel)
-        except: pass
 
     # --- UNSAVED CHANGES LOGIC ---
     def on_text_modified(self, event: Any) -> None:
@@ -552,6 +573,7 @@ class EditorTab(ttk.Frame):
         self.admin_mode_active = not self.admin_mode_active
         print(f"Admin mode: {self.admin_mode_active}")
 
+    # --- BULK ACTIONS ---
     def create_context_menus(self) -> None:
         self.menu_grid = tk.Menu(self, tearoff=0)
         self.menu_grid.add_command(label="↺ Revert to Source", command=self.bulk_revert_to_source)
