@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -7,52 +6,12 @@ import pandas as pd
 import zlib
 import base64
 import re
+# UPDATED: Import the new manager
+from utils.config_manager import ConfigManager
 
 # --- CONFIGURATION ---
-DEFAULT_CONFIG = {
-    "folder_names": {
-        "excel_export": "1_Excel_for_Translation",
-        "xliff_output": "2_Translated_XLIFFs",
-        "master_repo": "master_localization_files"
-    },
-    "protected_languages": [
-        "English", "British English", "American English", "Español", "Spanish",
-        "Français", "French", "Italiano", "Italian", "Deutsch", "German",
-        "Português", "Portuguese", "Português (Brasil)", "Svenska", "Swedish",
-        "Nederlands", "Dutch", "Dansk", "Danish", "Norsk", "Norwegian",
-        "Suomi", "Finnish", "Русский", "Russian", "Українська", "Ukrainian",
-        "Polskie", "Polish", "Čeština", "Czech", "Türk", "Turkish",
-        "Ελληνικά", "Greek", "Magyar", "Hungarian", "Română", "Romanian",
-        "日本語", "Japanese", "한국어", "Korean", "简体中文", "Chinese (Simplified)",
-        "繁體中文", "Chinese (Traditional)", "العربية", "Arabic", "עברית", "Hebrew",
-        "Bahasa Indonesia", "Indonesian", "Bahasa Melayu", "Malay", "Tiếng Việt", "Vietnamese",
-        "ไทย", "Thai", "हिंदी", "Hindi"
-    ]
-}
-
-def load_config():
-    if getattr(sys, 'frozen', False):
-        app_path = Path(sys.executable).parent
-    else:
-        app_path = Path(__file__).parent.parent
-        if not (app_path / "config.json").exists():
-             app_path = Path(__file__).parent.parent.parent
-
-    config_path = app_path / "config.json"
-    current = DEFAULT_CONFIG.copy()
-    
-    if config_path.exists():
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                user = json.load(f)
-                if "folder_names" in user: current["folder_names"].update(user["folder_names"])
-                if "protected_languages" in user: current["protected_languages"] = user["protected_languages"]
-        except: pass
-        
-    current["protected_set"] = {x.lower() for x in current["protected_languages"]}
-    return current
-
-CONFIG = load_config()
+# REFACTORED: Instantiating the class handles loading, defaults, and logic automatically.
+CONFIG = ConfigManager()
 
 # --- FILE HELPERS ---
 def log_errors(root_path, errors):
