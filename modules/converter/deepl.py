@@ -1,22 +1,37 @@
 import pandas as pd
 from pathlib import Path
+from typing import Tuple, List, Optional
 from utils.core import CONFIG
 
-def apply_deepl_translations(root_path, deepl_folder_path):
-    master_folder = root_path / CONFIG["folder_names"]["excel_export"]
-    if not master_folder.exists(): raise ValueError("Master folder not found.")
+def apply_deepl_translations(root_path: Path, deepl_folder_path: Optional[str]) -> Tuple[int, int, List[str]]:
+    """
+    Merges raw Excel translations (from DeepL) into the Master Excel files.
 
-    if not deepl_folder_path: return 0, 0, ["User cancelled."]
+    Args:
+        root_path (Path): Project root containing the export folder.
+        deepl_folder_path (Optional[str]): Path selected by the user (from file dialog).
+
+    Returns:
+        Tuple[int, int, List[str]]: (Updated Count, Total Masters, Error List)
+    """
+    master_folder = root_path / str(CONFIG["folder_names"]["excel_export"])
+    if not master_folder.exists():
+        raise ValueError("Master folder not found.")
+
+    if not deepl_folder_path:
+        return 0, 0, ["User cancelled."]
 
     deepl_folder = Path(deepl_folder_path)
     master_files = list(master_folder.glob("*-master.xlsx"))
     deepl_files = list(deepl_folder.glob("*.xlsx"))
 
-    if not master_files: raise ValueError("No master files found.")
-    if not deepl_files: raise ValueError("No DeepL files found.")
+    if not master_files:
+        raise ValueError("No master files found.")
+    if not deepl_files:
+        raise ValueError("No DeepL files found.")
 
     updated_count = 0
-    errors = []
+    errors: List[str] = []
 
     for master_file in master_files:
         base_lang_code = master_file.name.replace("-master.xlsx", "")
