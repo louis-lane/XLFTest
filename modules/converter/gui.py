@@ -4,8 +4,8 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pathlib import Path
 import threading
-from utils.shared import center_window
-# --- FIX: IMPORT FROM CONVERTER LOGIC ---
+# UPDATED: Imported log_errors
+from utils.shared import center_window, log_errors
 from modules.converter.logic import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
 
 class ConverterTab(ttk.Frame):
@@ -75,24 +75,22 @@ class ConverterTab(ttk.Frame):
     def run_apply_deepl(self):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
         if not root_dir: return
-
+        
+        # UPDATED: Ask for directory here in the main thread
         deepl_dir = filedialog.askdirectory(title="Select Folder with DeepL Files")
         if not deepl_dir: return
-            
-       def worker():
+
+        def worker():
             try:
-                # Pass both paths to the logic function
+                # UPDATED: Pass both paths to logic
                 updated, total, errors = apply_deepl_translations(Path(root_dir), Path(deepl_dir))
-                
                 msg = f"Updated {updated}/{total} files."
                 if errors: 
-                    log_errors(Path(root_dir), errors) # Ensure log_errors is imported/available
-                    msg += " Check logs."
+                    log_errors(Path(root_dir), errors)
+                    msg += " Check error_log.txt."
                 messagebox.showinfo("Result", msg)
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+            except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
-
 
     def run_export(self):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
@@ -172,4 +170,3 @@ class ConverterTab(ttk.Frame):
                 f.write("".join(str(v).ljust(w) for v, w in zip(total_values, widths)) + "\n")
             messagebox.showinfo("Success", f"Report successfully saved to:\n{filepath}")
         except Exception as e: messagebox.showerror("Export Error", f"Could not save the report: {e}")
-
