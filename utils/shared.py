@@ -120,13 +120,3 @@ def xliff_to_dataframe(xliff_path):
             'gomo-id (context)': tu.get('gomo-id', '')
         })
     return pd.DataFrame(records)
-
-def update_glossary_file(glossary_path, new_entries):
-    if Path(glossary_path).exists():
-        glossary_df = pd.read_excel(glossary_path)
-    else:
-        glossary_df = pd.DataFrame(columns=['source_text', 'target_text', 'language_code'])
-    new_entries_df = pd.DataFrame(new_entries)
-    combined_df = pd.concat([glossary_df, new_entries_df], ignore_index=True)
-    combined_df.drop_duplicates(subset=['source_text', 'language_code'], keep='first', inplace=True)
-    combined_df.to_excel(glossary_path, index=False)
