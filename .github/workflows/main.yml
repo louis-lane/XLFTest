@@ -1,4 +1,4 @@
-name: Build Modular Toolkit
+name: Build EXE
 
 on:
   # This setting ensures the workflow ONLY runs when you manually click "Run workflow"
