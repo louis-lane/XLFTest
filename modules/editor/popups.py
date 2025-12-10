@@ -3,13 +3,17 @@ from tkinter import ttk, messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pathlib import Path
-from utils.shared import get_target_language, center_window, CONFIG
-# NEW IMPORT:
+# UPDATED IMPORTS:
+from utils.core import get_target_language, CONFIG
+from utils.gui_utils import center_window
 from utils.glossary import add_term_to_file
 import pandas as pd
 import re
 from lxml import etree
 import shutil
+
+# ... (The rest of the file content remains exactly as it was)
+# You only need to change the lines 'from utils.shared import ...' at the top.
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -119,7 +123,6 @@ class AddTermDialog(ttk.Toplevel):
             "context": self.e_context.get().strip(), "is_forbidden": str(self.forbidden_var.get()).upper()
         }
         
-        # REFACTORED: Use shared utility
         try:
             add_term_to_file(g_path, new_row)
             self.logic_callback() 
