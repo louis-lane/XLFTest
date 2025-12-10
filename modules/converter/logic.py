@@ -2,9 +2,10 @@ import pandas as pd
 from lxml import etree
 from pathlib import Path
 from openpyxl.styles import PatternFill
-from utils.shared import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe, update_glossary_file
+from utils.shared import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe
+# NEW IMPORT:
+from utils.glossary import get_glossary_map, update_glossary_from_list
 
-# UPDATED: Added deepl_folder_path argument and removed internal UI calls
 def apply_deepl_translations(root_path, deepl_folder_path):
     master_folder = root_path / CONFIG["folder_names"]["excel_export"]
     if not master_folder.exists(): raise ValueError("Master folder not found.")
@@ -57,15 +58,8 @@ def export_to_excel_with_glossary(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No .xliff files found.")
     
-    glossary_map = {}
-    if glossary_path and Path(glossary_path).exists():
-        try:
-            glossary_df = pd.read_excel(glossary_path).fillna("")
-            for _, row in glossary_df.iterrows():
-                lang = str(row.get('language_code', 'unknown')).strip()
-                if lang not in glossary_map: glossary_map[lang] = {}
-                glossary_map[lang][str(row['source_text']).strip()] = str(row['target_text'])
-        except: pass
+    # REFACTORED: Use shared utility
+    glossary_map = get_glossary_map(glossary_path)
             
     output_dir = root_path / CONFIG["folder_names"]["excel_export"]
     output_dir.mkdir(exist_ok=True)
@@ -159,7 +153,8 @@ def import_and_reconstruct_with_glossary(root_path, glossary_path=None):
                         if pd.notna(row['target']):
                             new_entries.append({'source_text': row['source'], 'target_text': str(row['target']), 'language_code': lc})
             except: pass
-        if new_entries and glossary_path: update_glossary_file(glossary_path, new_entries)
+        # REFACTORED: Use shared utility
+        if new_entries and glossary_path: update_glossary_from_list(glossary_path, new_entries)
     except Exception as e: errors.append(f"Glossary update failed: {e}")
 
     trans_map = {}
@@ -211,15 +206,8 @@ def perform_analysis(root_path, glossary_path=None):
     xliff_files = list(root_path.glob('*.xliff'))
     if not xliff_files: raise ValueError("No XLIFF files.")
     
-    g_map = {}
-    if glossary_path and Path(glossary_path).exists():
-        try:
-            gdf = pd.read_excel(glossary_path).fillna("")
-            for _, r in gdf.iterrows():
-                lc = str(r.get('language_code', 'unknown'))
-                if lc not in g_map: g_map[lc] = {}
-                g_map[lc][str(r['source_text']).strip()] = str(r['target_text'])
-        except: pass
+    # REFACTORED: Use shared utility
+    g_map = get_glossary_map(glossary_path)
 
     records = []
     for f in xliff_files:
