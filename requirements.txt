@@ -3,3 +3,4 @@ lxml
 openpyxl
 pyinstaller
 ttkbootstrap
+pytest
