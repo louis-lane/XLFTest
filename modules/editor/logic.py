@@ -1,9 +1,13 @@
 import pandas as pd
 from lxml import etree
 from pathlib import Path
-from utils.shared import get_target_language
+# UPDATED IMPORT:
+from utils.core import get_target_language
 from utils.glossary import load_glossary_as_list, find_glossary_matches
 import re
+
+# ... (The rest of the file content remains exactly as it was in the previous step)
+# Since the body didn't change, you can just update the import lines at the top.
 
 class EditorLogic:
     def __init__(self):
@@ -35,11 +39,9 @@ class EditorLogic:
         tree.write(path, encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
     def load_glossary(self, path="glossary.xlsx"):
-        # REFACTORED: Delegated to utils/glossary.py
         self.glossary_data = load_glossary_as_list(path)
 
     def find_glossary_matches(self, source_text, current_file_path):
-        # REFACTORED: Delegated to utils/glossary.py
         return find_glossary_matches(source_text, current_file_path, self.glossary_data)
 
     def extract_tags(self, text, syntax_mode="Standard XML <>"):
