@@ -5,7 +5,6 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-# UPDATED IMPORTS: Matches your refactored utils structure
 from utils.core import get_target_language, log_errors, CONFIG
 from utils.gui_utils import center_window
 import shutil
@@ -14,7 +13,6 @@ import threading
 import os
 import pandas as pd
 
-# UPDATED IMPORTS: Matches your refactored modules structure
 from modules.editor.popups import ToolTip, FindReplacePane, AddTermDialog
 from modules.editor.logic import EditorLogic
 
@@ -135,7 +133,6 @@ class EditorTab(ttk.Frame):
         self.tree.pack(fill=BOTH, expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.on_row_select)
         
-        # NEW: Calls the updated context menu creation
         self.create_context_menus()
         self.tree.bind("<Button-3>", self.show_grid_menu)
 
@@ -270,13 +267,34 @@ class EditorTab(ttk.Frame):
             rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
             if rec: self.update_tag_menu(rec['source'])
 
+    # NEW: Updated to show Standard + Context tags
     def update_tag_menu(self, source_text):
         self.menu_tags.delete(0, END)
         syntax = self.tag_syntax_var.get()
-        tags = self.logic.extract_tags(source_text, syntax)
-        if not tags: self.menu_tags.add_command(label="(No tags found)", state=DISABLED); return
-        for tag in tags:
-            self.menu_tags.add_command(label=tag, command=lambda t=tag: self.insert_smart_tag(t))
+        
+        # Get structured tags from logic
+        tags = self.logic.get_tag_suggestions(source_text, syntax)
+        standard = tags['standard']
+        context = tags['context']
+
+        if not standard and not context:
+            self.menu_tags.add_command(label="(No tags available)", state=DISABLED)
+            return
+
+        # 1. Add Standard Tags (Always available)
+        if standard:
+            for tag in standard:
+                self.menu_tags.add_command(label=tag, command=lambda t=tag: self.insert_smart_tag(t))
+        
+        # 2. Add Separator if both exist
+        if standard and context:
+            self.menu_tags.add_separator()
+            self.menu_tags.add_command(label="From Context:", state=DISABLED)
+
+        # 3. Add Context Tags
+        if context:
+            for tag in context:
+                self.menu_tags.add_command(label=tag, command=lambda t=tag: self.insert_smart_tag(t))
 
     def insert_smart_tag(self, opener):
         closer = ""
