@@ -2,7 +2,6 @@ import re
 import pandas as pd
 from lxml import etree
 from pathlib import Path
-# UPDATED: Added Optional to imports
 from typing import Tuple, List, Dict, Any, Union, Optional
 from utils.core import get_target_language
 from utils.glossary import load_glossary_as_list, find_glossary_matches
@@ -13,6 +12,12 @@ class EditorLogic:
     Parses files, manages tags, and interfaces with the glossary.
     """
     
+    # NEW: Define standard tag sets for supported modes
+    STANDARD_TAGS = {
+        "Gomo []": ["[b]", "[/b]", "[i]", "[/i]", "[u]", "[/u]", "[br/]", "[p]", "[/p]"],
+        "Standard XML <>": ["<b>", "</b>", "<i>", "</i>", "<u>", "</u>", "<br/>", "<p>", "</p>"]
+    }
+
     def __init__(self):
         self.namespaces = {'xliff': 'urn:oasis:names:tc:xliff:document:1.2'}
         self.glossary_data: List[Dict[str, Any]] = []
@@ -56,10 +61,31 @@ class EditorLogic:
         """Delegates matching logic to the shared utility."""
         return find_glossary_matches(source_text, current_file_path, self.glossary_data)
 
+    def get_tag_suggestions(self, text: str, syntax_mode: str = "Standard XML <>") -> Dict[str, List[str]]:
+        """
+        Returns a dictionary containing two lists of tags:
+        1. 'standard': Predefined tags for the current mode.
+        2. 'context': Unique tags found in the source text that are NOT in the standard list.
+        """
+        # 1. Get Standard Tags
+        defaults = self.STANDARD_TAGS.get(syntax_mode, [])
+        
+        # 2. Extract Context Tags
+        extracted = self.extract_tags(text, syntax_mode)
+        
+        # 3. Filter Context Tags (Exclude duplicates from standard list)
+        # We normalize to lowercase for comparison to avoid [B] vs [b] duplicates
+        defaults_lower = {t.lower() for t in defaults}
+        unique_context = [t for t in extracted if t.lower() not in defaults_lower]
+        
+        return {
+            "standard": defaults,
+            "context": unique_context
+        }
+
     def extract_tags(self, text: str, syntax_mode: str = "Standard XML <>") -> List[str]:
         """
         Identifies and extracts markup tags from the source text.
-        Used to populate the 'Insert Tag' menu.
         """
         if not text: return []
         
@@ -74,9 +100,11 @@ class EditorLogic:
         seen = set()
         
         for tag in raw_matches:
-            # Skip closing tags (e.g. </b> or [/b])
-            if tag.startswith("</") or tag.startswith("[/"):
+            # Skip closing tags (e.g. </b> or [/b]) unless they are self-closing like <br/>
+            # Logic: If it starts with </ or [/ return False, UNLESS it's a known placeholder like %s
+            if (tag.startswith("</") or tag.startswith("[/")):
                 continue
+            
             if tag not in seen:
                 seen.add(tag)
                 unique_openers.append(tag)
