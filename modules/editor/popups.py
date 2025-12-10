@@ -4,6 +4,8 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pathlib import Path
 from utils.shared import get_target_language, center_window, CONFIG
+# NEW IMPORT:
+from utils.glossary import add_term_to_file
 import pandas as pd
 import re
 from lxml import etree
@@ -116,12 +118,10 @@ class AddTermDialog(ttk.Toplevel):
             "match_type": self.match_var.get(), "case_sensitive": str(self.case_var.get()).upper(),
             "context": self.e_context.get().strip(), "is_forbidden": str(self.forbidden_var.get()).upper()
         }
+        
+        # REFACTORED: Use shared utility
         try:
-            if g_path.exists():
-                df = pd.read_excel(g_path).fillna("")
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-            else: df = pd.DataFrame([new_row])
-            df.to_excel(g_path, index=False)
+            add_term_to_file(g_path, new_row)
             self.logic_callback() 
             messagebox.showinfo("Success", "Term added.")
             self.destroy()
