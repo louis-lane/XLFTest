@@ -4,8 +4,9 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pathlib import Path
 import threading
-# UPDATED: Imported log_errors
-from utils.shared import center_window, log_errors
+# UPDATED IMPORTS:
+from utils.gui_utils import center_window
+from utils.core import log_errors
 from modules.converter.logic import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
 
 class ConverterTab(ttk.Frame):
@@ -76,13 +77,11 @@ class ConverterTab(ttk.Frame):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
         if not root_dir: return
         
-        # UPDATED: Ask for directory here in the main thread
         deepl_dir = filedialog.askdirectory(title="Select Folder with DeepL Files")
         if not deepl_dir: return
 
         def worker():
             try:
-                # UPDATED: Pass both paths to logic
                 updated, total, errors = apply_deepl_translations(Path(root_dir), Path(deepl_dir))
                 msg = f"Updated {updated}/{total} files."
                 if errors: 
