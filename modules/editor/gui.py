@@ -5,11 +5,11 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Tuple
 import re
 
 # Internal Modules
-from utils.core import get_target_language, CONFIG
+from utils.core import get_target_language, log_errors, CONFIG
 from utils.gui_utils import center_window
 from modules.editor.popups import ToolTip, FindReplacePane, AddTermDialog
 from modules.editor.logic import EditorLogic
@@ -37,6 +37,10 @@ class EditorTab(ttk.Frame):
         self.find_visible: bool = False
         self.admin_mode_active: bool = False
         self.segment_dirty: bool = False
+        
+        # Drag & Drop State (Phase 3)
+        self.drag_start_index: Optional[str] = None
+        self.dragged_tag_text: Optional[str] = None
         
         self.setup_ui()
         self.setup_hotkeys()
@@ -175,6 +179,7 @@ class EditorTab(ttk.Frame):
         self.txt_target = tk.Text(self.edit_panel, height=4, undo=True, maxundo=50, wrap="word")
         self.txt_target.pack(fill=BOTH, expand=True)
         self.txt_target.bind("<Button-3>", self.show_target_menu)
+        # Bindings for selection and dragging
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
         self.txt_target.bind("<KeyRelease>", self.on_text_modified)
 
@@ -194,6 +199,36 @@ class EditorTab(ttk.Frame):
         self.btn_add_term.pack(side=RIGHT)
 
         self.find_pane = FindReplacePane(self.right_sidebar, self)
+
+    # --- DRAG & DROP HELPERS (New) ---
+    def get_tag_at_index(self, index: str) -> Optional[Tuple[str, str, str]]:
+        """
+        Checks if the given text index (e.g. '1.5') falls within a tag.
+        Returns: (tag_text, start_index, end_index) or None.
+        """
+        try:
+            line_num = index.split('.')[0]
+            line_start = f"{line_num}.0"
+            line_end = f"{line_num}.end"
+            line_text = self.txt_target.get(line_start, line_end)
+            
+            # Simple column parsing (assuming no embedded objects)
+            col = int(index.split('.')[1])
+            
+            # Get the regex for current mode
+            mode = self.tag_syntax_var.get()
+            pattern = self.logic.get_tag_pattern(mode)
+            
+            # Scan line for tags
+            for match in re.finditer(pattern, line_text):
+                start, end = match.span()
+                # Check if cursor is inside this tag's range
+                if start <= col < end:
+                    return (match.group(), f"{line_num}.{start}", f"{line_num}.{end}")
+            
+            return None
+        except Exception:
+            return None
 
     # --- LAYOUT LOGIC ---
     def toggle_sidebar(self) -> None:
@@ -252,12 +287,10 @@ class EditorTab(ttk.Frame):
 
     # --- TAG LOGIC ---
     def on_syntax_change(self, event: Any) -> None:
-        # We don't need to pre-build the menu anymore, it builds on click
         pass
 
     def show_tag_grid_popup(self) -> None:
         """Creates a compact 4-column grid popup for inserting tags."""
-        # 1. Get Data
         syntax = self.tag_syntax_var.get()
         source_text = ""
         if self.current_edit_id:
@@ -272,23 +305,19 @@ class EditorTab(ttk.Frame):
             messagebox.showinfo("Tags", "No tags available for this segment.")
             return
 
-        # 2. Create Popup
         popup = tk.Toplevel(self)
-        popup.overrideredirect(True) # Removes window border
+        popup.overrideredirect(True)
         popup.attributes('-topmost', True)
         
-        # Position logic (Anchored to Button)
         x = self.btn_tags.winfo_rootx()
         y = self.btn_tags.winfo_rooty() + self.btn_tags.winfo_height()
         popup.geometry(f"+{x}+{y}")
         
-        # Close when clicking away
         def close_popup(e):
             if str(e.widget) != str(popup): popup.destroy()
         popup.bind("<FocusOut>", lambda e: popup.destroy())
         popup.focus_set()
 
-        # 3. Build Grid
         frame = ttk.Frame(popup, padding=5, bootstyle="dark")
         frame.pack(fill=BOTH, expand=True)
         
@@ -298,7 +327,6 @@ class EditorTab(ttk.Frame):
 
         current_row = 0
         
-        # Standard Tags
         if standard:
             ttk.Label(frame, text="Standard", font=("Helvetica", 8, "bold"), bootstyle="inverse-dark").grid(row=current_row, column=0, columnspan=4, sticky="w", pady=(0, 2))
             current_row += 1
@@ -306,7 +334,6 @@ class EditorTab(ttk.Frame):
                 add_tag_btn(frame, tag, current_row + (i // 4), i % 4)
             current_row += (len(standard) // 4) + 1
 
-        # Context Tags
         if context:
             if standard: 
                 ttk.Separator(frame, orient=HORIZONTAL).grid(row=current_row, column=0, columnspan=4, sticky="ew", pady=5)
@@ -525,7 +552,6 @@ class EditorTab(ttk.Frame):
         self.admin_mode_active = not self.admin_mode_active
         print(f"Admin mode: {self.admin_mode_active}")
 
-    # --- BULK ACTIONS ---
     def create_context_menus(self) -> None:
         self.menu_grid = tk.Menu(self, tearoff=0)
         self.menu_grid.add_command(label="↺ Revert to Source", command=self.bulk_revert_to_source)
