@@ -3,7 +3,7 @@ name: Run Unit Tests
 on:
   push:
     # UPDATED: Added 'feature/bulk-actions' to the list
-    branches: [ "main", "Refactoring", "feature/bulk-actions" ]
+    branches: [ "main", "Refactoring", "feature/bulk-actions", "feature/standard-tags"]
   pull_request:
     branches: [ "main" ]
 
