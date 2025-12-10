@@ -182,10 +182,11 @@ class EditorTab(ttk.Frame):
         self.txt_target.pack(fill=BOTH, expand=True)
         self.txt_target.bind("<Button-3>", self.show_target_menu)
         
-        # --- DRAG AND DROP BINDINGS ---
+        # --- DRAG AND DROP & SELECTION BINDINGS ---
         self.txt_target.bind("<Button-1>", self.on_target_click)
         self.txt_target.bind("<B1-Motion>", self.on_target_drag)
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_release)
+        self.txt_target.bind("<Double-Button-1>", self.on_target_double_click) # NEW: Double click handler
         self.txt_target.bind("<KeyRelease>", self.on_text_modified)
 
         # 3. RIGHT SIDEBAR
@@ -245,18 +246,35 @@ class EditorTab(ttk.Frame):
 
     def on_target_drag(self, event: Any) -> Any:
         if self.dragging_tag:
-            # Move insertion cursor to follow mouse
-            self.txt_target.mark_set("insert", f"@{event.x},{event.y}")
+            x, y = event.x, event.y
+            raw_index = self.txt_target.index(f"@{x},{y}")
+            
+            # Check for Shift key (bit 0 usually, but safe to check LSB)
+            # event.state: 1=Shift, 4=Control, etc.
+            is_shift_held = (event.state & 0x0001) != 0
+            
+            if is_shift_held:
+                # Character granularity
+                target_index = raw_index
+            else:
+                # Word granularity (default)
+                # Snap to whichever word boundary is closer or just start
+                target_index = self.txt_target.index(f"{raw_index} wordstart")
+                
+            # Move insertion cursor to show where it will land
+            self.txt_target.mark_set("insert", target_index)
+            
             # Ensure the selection stays on the tag we are dragging
             if self.drag_start_index and self.drag_end_index:
                 self.txt_target.tag_remove("sel", "1.0", END)
                 self.txt_target.tag_add("sel", self.drag_start_index, self.drag_end_index)
+            
             return "break"
         return None
 
     def on_target_release(self, event: Any) -> Any:
         if self.dragging_tag:
-            drop_index = self.txt_target.index(f"@{event.x},{event.y}")
+            drop_index = self.txt_target.index("insert") # Use the cursor position we set during drag
             
             # Prevent dropping inside itself
             if self.txt_target.compare(drop_index, ">=", self.drag_start_index) and \
@@ -275,6 +293,57 @@ class EditorTab(ttk.Frame):
             self.txt_target.tag_remove("sel", "1.0", END)
             return "break"
         return None
+
+    # --- NEW: Double Click Selection Logic (Restored) ---
+    def on_target_double_click(self, event: Any) -> None:
+        """Restores the ability to select text between paired tags."""
+        try:
+            index = self.txt_target.index(f"@{event.x},{event.y}")
+            tag_info = self.get_tag_at_index(index)
+            
+            if not tag_info: return
+            
+            clicked_tag, t_start, t_end = tag_info
+            
+            # Determine if it's an opening or closing tag
+            mode = self.tag_syntax_var.get()
+            is_closing = clicked_tag.startswith("[/") or clicked_tag.startswith("</")
+            
+            # Extract core tag name (e.g. "b" from "[b]")
+            clean_content = re.sub(r"[\[\]<>/]", "", clicked_tag).split(" ")[0]
+            
+            open_char = '[' if mode == "Gomo []" else '<'
+            close_char = ']' if mode == "Gomo []" else '>'
+            
+            start_sel = None
+            end_sel = None
+            
+            if not is_closing:
+                # Find matching closer forward
+                closer = f"{open_char}/{clean_content}{close_char}"
+                search_res = self.txt_target.search(closer, t_end, stopindex=END)
+                if search_res:
+                    start_sel = t_start
+                    end_sel = f"{search_res} + {len(closer)}c"
+            else:
+                # Find matching opener backward
+                opener = f"{open_char}{clean_content}" # Approximate, ignores attributes
+                # Reverse search is tricky in Tkinter, simpler to just grab text?
+                # Tkinter search supports backwards with 'backwards=True'
+                # Note: We need a robust opener regex for attributes, but exact match is okay for simple cases
+                # Simple implementation: Search backwards for exact opener
+                search_res = self.txt_target.search(opener, t_start, stopindex="1.0", backwards=True)
+                if search_res:
+                    start_sel = search_res
+                    end_sel = t_end
+
+            if start_sel and end_sel:
+                self.txt_target.tag_remove("sel", "1.0", END)
+                self.txt_target.tag_add("sel", start_sel, end_sel)
+                return "break" # Stop default double-click selection
+                
+        except Exception:
+            pass
 
     # --- LAYOUT LOGIC ---
     def toggle_sidebar(self) -> None:
