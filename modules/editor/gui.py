@@ -5,7 +5,7 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-# UPDATED IMPORTS:
+# UPDATED IMPORTS: Matches your refactored utils structure
 from utils.core import get_target_language, log_errors, CONFIG
 from utils.gui_utils import center_window
 import shutil
@@ -14,11 +14,9 @@ import threading
 import os
 import pandas as pd
 
+# UPDATED IMPORTS: Matches your refactored modules structure
 from modules.editor.popups import ToolTip, FindReplacePane, AddTermDialog
 from modules.editor.logic import EditorLogic
-
-# ... (The rest of the file content remains exactly as it was)
-# You only need to change the lines 'from utils.shared import ...' at the top.
 
 class EditorTab(ttk.Frame):
     def __init__(self, parent):
@@ -137,6 +135,7 @@ class EditorTab(ttk.Frame):
         self.tree.pack(fill=BOTH, expand=True)
         self.tree.bind("<<TreeviewSelect>>", self.on_row_select)
         
+        # NEW: Calls the updated context menu creation
         self.create_context_menus()
         self.tree.bind("<Button-3>", self.show_grid_menu)
 
@@ -527,11 +526,35 @@ class EditorTab(ttk.Frame):
         self.admin_mode_active = not self.admin_mode_active
         print(f"Admin mode: {self.admin_mode_active}")
 
+    # --- NEW: Enhanced Context Menus (Bulk Actions) ---
     def create_context_menus(self):
+        # 1. Grid Context Menu (Bulk Actions)
         self.menu_grid = tk.Menu(self, tearoff=0)
-        self.menu_grid.add_command(label="Copy Source", command=self.copy_source_to_target)
-        self.menu_source = tk.Menu(self, tearoff=0); self.menu_source.add_command(label="Copy", command=lambda: self.text_copy(self.txt_source))
-        self.menu_target = tk.Menu(self, tearoff=0); self.menu_target.add_command(label="Copy", command=lambda: self.text_copy(self.txt_target))
+        
+        # Revert Action
+        self.menu_grid.add_command(label="↺ Revert to Source", command=self.bulk_revert_to_source)
+        self.menu_grid.add_separator()
+        
+        # Clipboard Actions
+        self.menu_grid.add_command(label="📄 Copy Source Text", command=lambda: self.copy_selection_to_clipboard("source"))
+        self.menu_grid.add_command(label="📄 Copy Target Text", command=lambda: self.copy_selection_to_clipboard("target"))
+        self.menu_grid.add_separator()
+        
+        # Status Submenu
+        self.status_menu = tk.Menu(self.menu_grid, tearoff=0)
+        self.menu_grid.add_cascade(label="Set Status", menu=self.status_menu)
+        
+        self.status_menu.add_command(label="🔴 New", command=lambda: self.bulk_set_status("new"))
+        self.status_menu.add_command(label="🟠 Needs Review", command=lambda: self.bulk_set_status("needs-review"))
+        self.status_menu.add_command(label="🟢 Translated", command=lambda: self.bulk_set_status("translated"))
+        self.status_menu.add_command(label="☑️ Final", command=lambda: self.bulk_set_status("final"))
+
+        # 2. Text Box Context Menus (Standard)
+        self.menu_source = tk.Menu(self, tearoff=0)
+        self.menu_source.add_command(label="Copy", command=lambda: self.text_copy(self.txt_source))
+        
+        self.menu_target = tk.Menu(self, tearoff=0)
+        self.menu_target.add_command(label="Copy", command=lambda: self.text_copy(self.txt_target))
         self.menu_target.add_command(label="Paste", command=lambda: self.text_paste(self.txt_target))
 
     def show_grid_menu(self, event):
@@ -543,6 +566,100 @@ class EditorTab(ttk.Frame):
         if self.current_edit_id:
             rec = next((x for x in self.data_store if str(x['id']) == str(self.current_edit_id)), None)
             if rec: self.txt_target.delete("1.0", END); self.txt_target.insert("1.0", rec['source']); self.segment_dirty = True
+            
+    def get_selected_ids(self):
+        """Returns a list of XLIFF IDs for all currently selected rows."""
+        return [self.tree.item(i)['values'][0] for i in self.tree.selection()]
+
+    def bulk_set_status(self, new_status):
+        ids = self.get_selected_ids()
+        if not ids: return
+
+        # Visual map for updating the tree immediately
+        status_map = {'new': '🔴', 'needs-review': '🟠', 'translated': '🟢', 'final': '☑️'}
+        icon = status_map.get(new_status, '❓')
+        tag = new_status.replace("-", "_")
+
+        count = 0
+        for uid in ids:
+            rec = next((r for r in self.data_store if str(r['id']) == str(uid)), None)
+            if rec:
+                # Update Data Store
+                rec['status'] = new_status
+
+                # Update XML
+                if 'node' in rec:
+                    tgt_node = rec['node'].find('xliff:target', namespaces=self.logic.namespaces)
+                    if tgt_node is None:
+                        tgt_node = etree.SubElement(rec['node'], f"{{{self.logic.namespaces['xliff']}}}target")
+                        tgt_node.text = rec['target']
+                    tgt_node.set('state', new_status)
+
+                # Update Treeview (Visuals)
+                for child in self.tree.get_children():
+                    if str(self.tree.item(child, 'values')[0]) == str(uid):
+                        vals = list(self.tree.item(child, 'values'))
+                        vals[3] = icon # Status column
+                        self.tree.item(child, values=vals, tags=(tag,))
+                        break
+                count += 1
+
+        if count > 0:
+            self.save_file(silent=True)
+            # Update the editor panel if the currently edited row was changed
+            if self.current_edit_id in ids:
+                self.edit_status_var.set(new_status)
+
+    def bulk_revert_to_source(self):
+        ids = self.get_selected_ids()
+        if not ids: return
+
+        if not messagebox.askyesno("Confirm Revert", f"Are you sure you want to revert {len(ids)} segments to their source text?"):
+            return
+
+        count = 0
+        for uid in ids:
+            rec = next((r for r in self.data_store if str(r['id']) == str(uid)), None)
+            if rec:
+                new_text = rec['source']
+                rec['target'] = new_text
+                
+                # Update XML
+                if 'node' in rec:
+                    tgt_node = rec['node'].find('xliff:target', namespaces=self.logic.namespaces)
+                    if tgt_node is None:
+                        tgt_node = etree.SubElement(rec['node'], f"{{{self.logic.namespaces['xliff']}}}target")
+                    tgt_node.text = new_text
+
+                # Update Treeview
+                for child in self.tree.get_children():
+                    if str(self.tree.item(child, 'values')[0]) == str(uid):
+                        vals = list(self.tree.item(child, 'values'))
+                        vals[2] = new_text.replace('\n', ' ') # Target column
+                        self.tree.item(child, values=vals)
+                        break
+                count += 1
+
+        if count > 0:
+            self.save_file(silent=True)
+            if self.current_edit_id in ids:
+                self.txt_target.delete("1.0", END)
+                self.txt_target.insert("1.0", self.txt_source.get("1.0", END).strip())
+
+    def copy_selection_to_clipboard(self, mode="source"):
+        ids = self.get_selected_ids()
+        text_lines = []
+        for uid in ids:
+            rec = next((r for r in self.data_store if str(r['id']) == str(uid)), None)
+            if rec:
+                val = rec['source'] if mode == "source" else rec['target']
+                if val: text_lines.append(val)
+
+        if text_lines:
+            full_text = "\n".join(text_lines)
+            self.clipboard_clear()
+            self.clipboard_append(full_text)
+
     def clear_target(self): self.txt_target.delete("1.0", END); self.segment_dirty = True
     def text_copy(self, w): 
         try: self.clipboard_clear(); self.clipboard_append(w.get("sel.first", "sel.last"))
