@@ -1,9 +1,8 @@
 name: Build Modular Toolkit
 
 on:
+  # This setting ensures the workflow ONLY runs when you manually click "Run workflow"
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
 
 jobs:
   build:
@@ -26,14 +25,12 @@ jobs:
         pip install -r requirements.txt
 
     # 4. Build the EXE
-    # Note: We point to 'main.py' now. 
-    # PyInstaller automatically finds 'modules/' and 'utils/' because they are imported in main.py
+    # Includes fixes for module discovery (--paths) and themes (--collect-all)
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --name "LocalizationToolkit" main.py
+        pyinstaller --onefile --noconsole --name "LocalizationToolkit" --collect-all ttkbootstrap --paths . --hidden-import modules.converter.gui --hidden-import modules.editor.gui --hidden-import utils.shared main.py
 
     # 5. Upload EXE AND Config
-    # We upload both files so when you download the zip, it's ready to run.
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
