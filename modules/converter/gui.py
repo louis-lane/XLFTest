@@ -4,12 +4,17 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pathlib import Path
 import threading
-# UPDATED IMPORTS:
 from utils.gui_utils import center_window
 from utils.core import log_errors
-from modules.converter.logic import apply_deepl_translations, export_to_excel_with_glossary, import_and_reconstruct_with_glossary, perform_analysis
+
+# UPDATED IMPORTS:
+from modules.converter.deepl import apply_deepl_translations
+from modules.converter.export import export_to_excel_with_glossary
+from modules.converter.reconstruction import import_and_reconstruct_with_glossary
+from modules.converter.analysis import perform_analysis
 
 class ConverterTab(ttk.Frame):
+    # ... (Rest of the file remains exactly the same)
     def __init__(self, parent):
         super().__init__(parent, padding=10)
         self.glossary_path = None
