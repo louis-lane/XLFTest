@@ -85,8 +85,9 @@ class EditorLogic:
     def get_tag_pattern(self, syntax_mode: str) -> str:
         """Returns the regex pattern for the given syntax mode."""
         patterns = {
-            "Standard XML <>": r"(<[^>/]+[^>]*>|{[^}]+}|%[sd])",
-            "Gomo []": r"(\[[^\]/]+\]|{[^}]+}|%[sd])"
+            # UPDATED: Removed the '/' exclusion so it matches closing tags too (e.g., </b> or [/b])
+            "Standard XML <>": r"(<[^>]+>|{[^}]+}|%[sd])",  
+            "Gomo []": r"(\[[^\]]+\]|{[^}]+}|%[sd])"       
         }
         return patterns.get(syntax_mode, patterns["Standard XML <>"])
 
