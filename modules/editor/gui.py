@@ -44,6 +44,11 @@ class EditorTab(ttk.Frame):
         self.drag_end_index: Optional[str] = None
         self.dragged_tag_text: Optional[str] = None
         
+        # Threshold & Visuals State
+        self.drag_start_xy: Optional[Tuple[int, int]] = None
+        self.drag_threshold_passed: bool = False
+        self.original_cursor_color: Optional[str] = None
+        
         self.setup_ui()
         self.setup_hotkeys()
         self.logic.load_glossary()
@@ -186,7 +191,7 @@ class EditorTab(ttk.Frame):
         self.txt_target.bind("<Button-1>", self.on_target_click)
         self.txt_target.bind("<B1-Motion>", self.on_target_drag)
         self.txt_target.bind("<ButtonRelease-1>", self.on_target_release)
-        self.txt_target.bind("<Double-Button-1>", self.on_target_double_click) # NEW: Double click handler
+        self.txt_target.bind("<Double-Button-1>", self.on_target_double_click)
         self.txt_target.bind("<KeyRelease>", self.on_text_modified)
 
         # 3. RIGHT SIDEBAR
@@ -234,6 +239,10 @@ class EditorTab(ttk.Frame):
             self.dragging_tag = True
             self.dragged_tag_text, self.drag_start_index, self.drag_end_index = tag_info
             
+            # Record start pos for Threshold Check
+            self.drag_start_xy = (event.x, event.y)
+            self.drag_threshold_passed = False
+            
             # Select the tag visually
             self.txt_target.tag_remove("sel", "1.0", END)
             self.txt_target.tag_add("sel", self.drag_start_index, self.drag_end_index)
@@ -246,11 +255,23 @@ class EditorTab(ttk.Frame):
 
     def on_target_drag(self, event: Any) -> Any:
         if self.dragging_tag:
+            # 1. Check Threshold (5 pixels)
+            if not self.drag_threshold_passed:
+                start_x, start_y = self.drag_start_xy
+                dist = ((event.x - start_x)**2 + (event.y - start_y)**2)**0.5
+                if dist < 5:
+                    return "break" # Block drag until moved enough
+                self.drag_threshold_passed = True
+                
+                # VISUAL FEEDBACK: Change cursor to Blue
+                self.original_cursor_color = self.txt_target.cget('insertbackground')
+                self.txt_target.config(insertbackground='#00bfff', insertwidth=3)
+
+            # 2. Handle Movement Logic
             x, y = event.x, event.y
             raw_index = self.txt_target.index(f"@{x},{y}")
             
-            # Check for Shift key (bit 0 usually, but safe to check LSB)
-            # event.state: 1=Shift, 4=Control, etc.
+            # Check for Shift key (bit 0)
             is_shift_held = (event.state & 0x0001) != 0
             
             if is_shift_held:
@@ -258,7 +279,6 @@ class EditorTab(ttk.Frame):
                 target_index = raw_index
             else:
                 # Word granularity (default)
-                # Snap to whichever word boundary is closer or just start
                 target_index = self.txt_target.index(f"{raw_index} wordstart")
                 
             # Move insertion cursor to show where it will land
@@ -273,8 +293,19 @@ class EditorTab(ttk.Frame):
         return None
 
     def on_target_release(self, event: Any) -> Any:
+        # RESET VISUALS: Always restore cursor
+        if self.original_cursor_color:
+            self.txt_target.config(insertbackground=self.original_cursor_color, insertwidth=1)
+            self.original_cursor_color = None
+
         if self.dragging_tag:
-            drop_index = self.txt_target.index("insert") # Use the cursor position we set during drag
+            # If we never passed the threshold, treat it as a click/selection only
+            if not self.drag_threshold_passed:
+                self.dragging_tag = False
+                self.drag_start_xy = None
+                return "break"
+
+            drop_index = self.txt_target.index("insert") 
             
             # Prevent dropping inside itself
             if self.txt_target.compare(drop_index, ">=", self.drag_start_index) and \
@@ -294,14 +325,14 @@ class EditorTab(ttk.Frame):
             return "break"
         return None
 
-    # --- NEW: Double Click Selection Logic (Restored) ---
-    def on_target_double_click(self, event: Any) -> None:
+    # --- DOUBLE CLICK SELECTION ---
+    def on_target_double_click(self, event: Any) -> Any:
         """Restores the ability to select text between paired tags."""
         try:
             index = self.txt_target.index(f"@{event.x},{event.y}")
             tag_info = self.get_tag_at_index(index)
             
-            if not tag_info: return
+            if not tag_info: return None # Let default behavior handle non-tag double clicks
             
             clicked_tag, t_start, t_end = tag_info
             
@@ -309,7 +340,7 @@ class EditorTab(ttk.Frame):
             mode = self.tag_syntax_var.get()
             is_closing = clicked_tag.startswith("[/") or clicked_tag.startswith("</")
             
-            # Extract core tag name (e.g. "b" from "[b]")
+            # Extract core tag name
             clean_content = re.sub(r"[\[\]<>/]", "", clicked_tag).split(" ")[0]
             
             open_char = '[' if mode == "Gomo []" else '<'
@@ -327,11 +358,7 @@ class EditorTab(ttk.Frame):
                     end_sel = f"{search_res} + {len(closer)}c"
             else:
                 # Find matching opener backward
-                opener = f"{open_char}{clean_content}" # Approximate, ignores attributes
-                # Reverse search is tricky in Tkinter, simpler to just grab text?
-                # Tkinter search supports backwards with 'backwards=True'
-                # Note: We need a robust opener regex for attributes, but exact match is okay for simple cases
-                # Simple implementation: Search backwards for exact opener
+                opener = f"{open_char}{clean_content}" 
                 search_res = self.txt_target.search(opener, t_start, stopindex="1.0", backwards=True)
                 if search_res:
                     start_sel = search_res
@@ -344,6 +371,7 @@ class EditorTab(ttk.Frame):
                 
         except Exception:
             pass
+        return None
 
     # --- LAYOUT LOGIC ---
     def toggle_sidebar(self) -> None:
