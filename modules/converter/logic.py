@@ -1,7 +1,6 @@
 import pandas as pd
 from lxml import etree
 from pathlib import Path
-from tkinter import filedialog
 from openpyxl.styles import PatternFill
 from utils.shared import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe, update_glossary_file
 
@@ -244,4 +243,5 @@ def perform_analysis(root_path, glossary_path=None):
         
         results[lc] = {'Total Words': ldf['wc'].sum(), 'Repetitions': rep_w, 'Glossary Matches': match_w, 'New Words': new_w}
     return results
+
 
