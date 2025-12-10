@@ -28,11 +28,10 @@ jobs:
     # 4. Build the EXE
     # Note: We point to 'main.py' now. 
     # PyInstaller automatically finds 'modules/' and 'utils/' because they are imported in main.py
+    # 4. Build the EXE
     - name: Build with PyInstaller
       run: |
-        # Added --collect-all ttkbootstrap to prevent theme errors
-        pyinstaller --onefile --noconsole --name "LocalizationToolkit" --collect-all ttkbootstrap main.py
-
+        pyinstaller --onefile --noconsole --name "LocalizationToolkit" --collect-all ttkbootstrap --paths . --hidden-import modules.converter.gui --hidden-import modules.editor.gui --hidden-import utils.shared main.py
     # 5. Upload EXE AND Config
     # We upload both files so when you download the zip, it's ready to run.
     - name: Upload Artifact
