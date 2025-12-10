@@ -1,0 +1,81 @@
+import json
+import sys
+from pathlib import Path
+from collections import UserDict
+import copy
+
+class ConfigManager(UserDict):
+    """
+    Robust configuration handler.
+    Acts like a dictionary but handles loading, defaults, and derived values.
+    """
+    
+    # Static Default Configuration (Fallback)
+    DEFAULT = {
+        "folder_names": {
+            "excel_export": "1_Excel_for_Translation",
+            "xliff_output": "2_Translated_XLIFFs",
+            "master_repo": "master_localization_files"
+        },
+        "protected_languages": [
+            "English", "British English", "American English", "Español", "Spanish",
+            "Français", "French", "Italiano", "Italian", "Deutsch", "German",
+            "Português", "Portuguese", "Português (Brasil)", "Svenska", "Swedish",
+            "Nederlands", "Dutch", "Dansk", "Danish", "Norsk", "Norwegian",
+            "Suomi", "Finnish", "Русский", "Russian", "Українська", "Ukrainian",
+            "Polskie", "Polish", "Čeština", "Czech", "Türk", "Turkish",
+            "Ελληνικά", "Greek", "Magyar", "Hungarian", "Română", "Romanian",
+            "日本語", "Japanese", "한국어", "Korean", "简体中文", "Chinese (Simplified)",
+            "繁體中文", "Chinese (Traditional)", "العربية", "Arabic", "עברית", "Hebrew",
+            "Bahasa Indonesia", "Indonesian", "Bahasa Melayu", "Malay", "Tiếng Việt", "Vietnamese",
+            "ไทย", "Thai", "हिंदी", "Hindi"
+        ]
+    }
+
+    def __init__(self):
+        # Initialize with a deep copy of defaults so we don't mutate the class attribute
+        super().__init__(copy.deepcopy(self.DEFAULT))
+        self.config_path = None
+        self.load_from_file()
+        self._generate_derived_data()
+
+    def resolve_root_path(self):
+        """Intelligently finds the project root."""
+        if getattr(sys, 'frozen', False):
+            return Path(sys.executable).parent
+        
+        # Standard dev structure: /utils/config_manager.py -> /utils/ -> /
+        current_file = Path(__file__)
+        return current_file.parent.parent
+
+    def load_from_file(self):
+        root = self.resolve_root_path()
+        self.config_path = root / "config.json"
+        
+        if not self.config_path.exists():
+            # If explicit config missing, try looking up one level (robustness for tests)
+            if (root.parent / "config.json").exists():
+                self.config_path = root.parent / "config.json"
+            else:
+                return # Keep defaults
+
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                user_data = json.load(f)
+                self._recursive_update(self.data, user_data)
+        except Exception as e:
+            print(f"Warning: Failed to load config.json (using defaults): {e}")
+
+    def _recursive_update(self, base, update):
+        """Recursively merges dictionaries (e.g. folder_names) instead of overwriting."""
+        for k, v in update.items():
+            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                self._recursive_update(base[k], v)
+            else:
+                base[k] = v
+
+    def _generate_derived_data(self):
+        """Creates fast-lookup sets from the raw lists."""
+        langs = self.data.get("protected_languages", [])
+        # 'protected_set' is used by the converter for O(1) lookups
+        self.data["protected_set"] = {str(x).lower() for x in langs}
