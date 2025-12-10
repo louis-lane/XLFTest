@@ -2,10 +2,14 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from modules.converter.gui import ConverterTab
 from modules.editor.gui import EditorTab
-from utils.shared import center_window
+# UPDATED IMPORT
+from utils.gui_utils import center_window
 import os
 from pathlib import Path
 import sys
+
+# ... (The rest of the file content remains exactly as it was)
+# You only need to change the line 'from utils.shared import center_window' at the top.
 
 class MainApp(ttk.Window):
     def __init__(self):
