@@ -1,4 +1,4 @@
-name: Build Modular Toolkit
+name: Build EXE
 
 on:
   workflow_dispatch:
