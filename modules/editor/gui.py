@@ -5,16 +5,20 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-from utils.shared import get_target_language, log_errors, CONFIG, center_window
+# UPDATED IMPORTS:
+from utils.core import get_target_language, log_errors, CONFIG
+from utils.gui_utils import center_window
 import shutil
 import re
 import threading
 import os
 import pandas as pd
 
-# --- IMPORTS FROM SPLIT MODULES ---
 from modules.editor.popups import ToolTip, FindReplacePane, AddTermDialog
 from modules.editor.logic import EditorLogic
+
+# ... (The rest of the file content remains exactly as it was)
+# You only need to change the lines 'from utils.shared import ...' at the top.
 
 class EditorTab(ttk.Frame):
     def __init__(self, parent):
