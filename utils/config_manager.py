@@ -1,8 +1,9 @@
 import json
 import sys
+import copy
 from pathlib import Path
 from collections import UserDict
-import copy
+from typing import Dict, Any, Optional
 
 class ConfigManager(UserDict):
     """
@@ -11,7 +12,7 @@ class ConfigManager(UserDict):
     """
     
     # Static Default Configuration (Fallback)
-    DEFAULT = {
+    DEFAULT: Dict[str, Any] = {
         "folder_names": {
             "excel_export": "1_Excel_for_Translation",
             "xliff_output": "2_Translated_XLIFFs",
@@ -32,15 +33,18 @@ class ConfigManager(UserDict):
         ]
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Initialize with a deep copy of defaults so we don't mutate the class attribute
         super().__init__(copy.deepcopy(self.DEFAULT))
-        self.config_path = None
+        self.config_path: Optional[Path] = None
         self.load_from_file()
         self._generate_derived_data()
 
-    def resolve_root_path(self):
-        """Intelligently finds the project root."""
+    def resolve_root_path(self) -> Path:
+        """
+        Intelligently finds the project root directory.
+        Handles both frozen (PyInstaller) and script environments.
+        """
         if getattr(sys, 'frozen', False):
             return Path(sys.executable).parent
         
@@ -48,7 +52,11 @@ class ConfigManager(UserDict):
         current_file = Path(__file__)
         return current_file.parent.parent
 
-    def load_from_file(self):
+    def load_from_file(self) -> None:
+        """
+        Attempts to load 'config.json' from the root directory.
+        Falls back to defaults if the file is missing or invalid.
+        """
         root = self.resolve_root_path()
         self.config_path = root / "config.json"
         
@@ -66,15 +74,17 @@ class ConfigManager(UserDict):
         except Exception as e:
             print(f"Warning: Failed to load config.json (using defaults): {e}")
 
-    def _recursive_update(self, base, update):
-        """Recursively merges dictionaries (e.g. folder_names) instead of overwriting."""
+    def _recursive_update(self, base: Dict[str, Any], update: Dict[str, Any]) -> None:
+        """
+        Recursively merges dictionaries (e.g. folder_names) instead of overwriting.
+        """
         for k, v in update.items():
             if k in base and isinstance(base[k], dict) and isinstance(v, dict):
                 self._recursive_update(base[k], v)
             else:
                 base[k] = v
 
-    def _generate_derived_data(self):
+    def _generate_derived_data(self) -> None:
         """Creates fast-lookup sets from the raw lists."""
         langs = self.data.get("protected_languages", [])
         # 'protected_set' is used by the converter for O(1) lookups
