@@ -28,4 +28,4 @@ jobs:
       # ensuring it can find your modules.
       run: |
         export PYTHONPATH=$PYTHONPATH:.
-        pytest tests/
+        pytest -v tests/
