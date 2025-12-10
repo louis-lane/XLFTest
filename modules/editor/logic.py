@@ -2,7 +2,8 @@ import re
 import pandas as pd
 from lxml import etree
 from pathlib import Path
-from typing import Tuple, List, Dict, Any, Union
+# UPDATED: Added Optional to imports
+from typing import Tuple, List, Dict, Any, Union, Optional
 from utils.core import get_target_language
 from utils.glossary import load_glossary_as_list, find_glossary_matches
 
