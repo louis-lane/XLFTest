@@ -5,11 +5,10 @@ from tkinter import filedialog
 from openpyxl.styles import PatternFill
 from utils.shared import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe, update_glossary_file
 
-def apply_deepl_translations(root_path):
+def apply_deepl_translations(root_path, deepl_folder_path):
     master_folder = root_path / CONFIG["folder_names"]["excel_export"]
     if not master_folder.exists(): raise ValueError("Master folder not found.")
 
-    deepl_folder_path = filedialog.askdirectory(title="Select Folder with DeepL Files")
     if not deepl_folder_path: return 0, 0, ["User cancelled."]
 
     deepl_folder = Path(deepl_folder_path)
@@ -245,3 +244,4 @@ def perform_analysis(root_path, glossary_path=None):
         
         results[lc] = {'Total Words': ldf['wc'].sum(), 'Repetitions': rep_w, 'Glossary Matches': match_w, 'New Words': new_w}
     return results
+
