@@ -4,6 +4,7 @@ from pathlib import Path
 from openpyxl.styles import PatternFill
 from utils.shared import CONFIG, log_errors, get_target_language, compress_ids, decompress_ids, xliff_to_dataframe, update_glossary_file
 
+# UPDATED: Added deepl_folder_path argument and removed internal UI calls
 def apply_deepl_translations(root_path, deepl_folder_path):
     master_folder = root_path / CONFIG["folder_names"]["excel_export"]
     if not master_folder.exists(): raise ValueError("Master folder not found.")
@@ -243,5 +244,3 @@ def perform_analysis(root_path, glossary_path=None):
         
         results[lc] = {'Total Words': ldf['wc'].sum(), 'Repetitions': rep_w, 'Glossary Matches': match_w, 'New Words': new_w}
     return results
-
-
