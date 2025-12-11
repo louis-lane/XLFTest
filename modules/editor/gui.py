@@ -5,11 +5,11 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from lxml import etree
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Tuple
 import re
 
 # Internal Modules
-from utils.core import get_target_language, CONFIG
+from utils.core import get_target_language, log_errors, CONFIG
 from utils.gui_utils import center_window
 from modules.editor.popups import ToolTip, FindReplacePane, AddTermDialog
 from modules.editor.logic import EditorLogic
@@ -37,6 +37,20 @@ class EditorTab(ttk.Frame):
         self.find_visible: bool = False
         self.admin_mode_active: bool = False
         self.segment_dirty: bool = False
+        
+        # Search & Highlight State
+        self.temp_search_term: Optional[str] = None # Stores term from Find/Replace pane
+        
+        # Drag & Drop State
+        self.dragging_tag: bool = False
+        self.drag_start_index: Optional[str] = None
+        self.drag_end_index: Optional[str] = None
+        self.dragged_tag_text: Optional[str] = None
+        
+        # Threshold & Visuals State
+        self.drag_start_xy: Optional[Tuple[int, int]] = None
+        self.drag_threshold_passed: bool = False
+        self.original_cursor_color: Optional[str] = None
         
         self.setup_ui()
         self.setup_hotkeys()
@@ -151,7 +165,7 @@ class EditorTab(ttk.Frame):
         ttk.Button(h, text="U", width=2, command=lambda: self.format_text("u"), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
         
         # Grid Popup Button
-        self.btn_tags = ttk.Button(h, text="</>", bootstyle="secondary-outline", command=self.show_tag_grid_popup)
+        self.btn_tags = ttk.Button(h, text="</>", bootstyle="secondary-outline", command=lambda: self.show_tag_grid_popup(self.btn_tags, self.txt_target))
         self.btn_tags.pack(side=LEFT, padx=(5, 1))
         ToolTip(self.btn_tags, "Insert Smart Tag")
 
@@ -174,8 +188,18 @@ class EditorTab(ttk.Frame):
         ttk.Label(self.edit_panel, text="Target:", bootstyle="inverse-secondary").pack(anchor=W)
         self.txt_target = tk.Text(self.edit_panel, height=4, undo=True, maxundo=50, wrap="word")
         self.txt_target.pack(fill=BOTH, expand=True)
+        # Configure Styles
+        self.txt_target.tag_configure("tag_highlight", foreground="#00bfff") 
+        self.txt_target.tag_configure("search_highlight", background="yellow", foreground="black") 
+        
         self.txt_target.bind("<Button-3>", self.show_target_menu)
-        self.txt_target.bind("<ButtonRelease-1>", self.on_target_click)
+        
+        # --- DRAG AND DROP & SELECTION BINDINGS ---
+        self.txt_target.bind("<Button-1>", self.on_target_click)
+        self.txt_target.bind("<B1-Motion>", self.on_target_drag)
+        self.txt_target.bind("<ButtonRelease-1>", self.on_target_release)
+        self.txt_target.bind("<Double-Button-1>", self.on_target_double_click)
+        self.txt_target.bind("<Triple-Button-1>", self.on_target_triple_click) # NEW: Triple click trigger
         self.txt_target.bind("<KeyRelease>", self.on_text_modified)
 
         # 3. RIGHT SIDEBAR
@@ -194,6 +218,267 @@ class EditorTab(ttk.Frame):
         self.btn_add_term.pack(side=RIGHT)
 
         self.find_pane = FindReplacePane(self.right_sidebar, self)
+
+    # --- SYNTAX & SEARCH HIGHLIGHTING ---
+    def highlight_syntax(self, target_widget: Optional[tk.Text] = None) -> None:
+        """Applies blue highlighting to all tags in the target text."""
+        w = target_widget if target_widget else self.txt_target
+        w.tag_remove("tag_highlight", "1.0", END)
+        
+        mode = self.tag_syntax_var.get()
+        pattern = self.logic.get_tag_pattern(mode)
+        
+        text_content = w.get("1.0", "end-1c")
+        
+        for match in re.finditer(pattern, text_content):
+            start_index = f"1.0 + {match.start()} chars"
+            end_index = f"1.0 + {match.end()} chars"
+            w.tag_add("tag_highlight", start_index, end_index)
+
+    def highlight_search_matches(self, target_widget: Optional[tk.Text] = None) -> None:
+        """Highlights occurrences of the current search term."""
+        w = target_widget if target_widget else self.txt_target
+        w.tag_remove("search_highlight", "1.0", END)
+        
+        # Determine active term: Filter Box > Find Pane > None
+        term = self.search_var.get().strip()
+        if not term and self.temp_search_term:
+            term = self.temp_search_term
+            
+        if not term: return
+        
+        # Standard Tkinter Search
+        start_pos = "1.0"
+        while True:
+            pos = w.search(term, start_pos, stopindex=END, nocase=True)
+            if not pos: break
+            
+            end_pos = f"{pos}+{len(term)}c"
+            w.tag_add("search_highlight", pos, end_pos)
+            start_pos = end_pos
+
+    # --- DRAG & DROP LOGIC ---
+    def get_tag_at_index(self, index: str, widget: tk.Text) -> Optional[Tuple[str, str, str]]:
+        """Checks if the given index falls within a tag. Returns (text, start, end)."""
+        try:
+            line_num = index.split('.')[0]
+            line_text = widget.get(f"{line_num}.0", f"{line_num}.end")
+            col = int(index.split('.')[1])
+            
+            mode = self.tag_syntax_var.get()
+            pattern = self.logic.get_tag_pattern(mode)
+            
+            for match in re.finditer(pattern, line_text):
+                start, end = match.span()
+                if start <= col < end:
+                    return (match.group(), f"{line_num}.{start}", f"{line_num}.{end}")
+            return None
+        except Exception:
+            return None
+
+    def on_target_click(self, event: Any) -> Any:
+        widget = event.widget
+        # Check if we clicked on a tag
+        index = widget.index(f"@{event.x},{event.y}")
+        tag_info = self.get_tag_at_index(index, widget)
+        
+        if tag_info:
+            self.dragging_tag = True
+            self.dragged_tag_text, self.drag_start_index, self.drag_end_index = tag_info
+            
+            # Record start pos for Threshold Check
+            self.drag_start_xy = (event.x, event.y)
+            self.drag_threshold_passed = False
+            
+            # Select the tag visually
+            widget.tag_remove("sel", "1.0", END)
+            widget.tag_add("sel", self.drag_start_index, self.drag_end_index)
+            
+            # Prevent default cursor placement so we can drag
+            return "break"
+        
+        self.dragging_tag = False
+        return None
+
+    def on_target_drag(self, event: Any) -> Any:
+        if self.dragging_tag:
+            widget = event.widget
+            # 1. Check Threshold (5 pixels)
+            if not self.drag_threshold_passed:
+                start_x, start_y = self.drag_start_xy
+                dist = ((event.x - start_x)**2 + (event.y - start_y)**2)**0.5
+                if dist < 5:
+                    return "break" # Block drag until moved enough
+                self.drag_threshold_passed = True
+                
+                # VISUAL FEEDBACK: Change cursor to Blue
+                self.original_cursor_color = widget.cget('insertbackground')
+                widget.config(insertbackground='#00bfff', insertwidth=3)
+
+            # 2. Handle Movement Logic
+            x, y = event.x, event.y
+            raw_index = widget.index(f"@{x},{y}")
+            
+            # Check for Shift key (bit 0)
+            is_shift_held = (event.state & 0x0001) != 0
+            
+            if is_shift_held:
+                # Character granularity
+                target_index = raw_index
+            else:
+                # Word granularity (default)
+                target_index = widget.index(f"{raw_index} wordstart")
+                
+            # Move insertion cursor to show where it will land
+            widget.mark_set("insert", target_index)
+            
+            # Ensure the selection stays on the tag we are dragging
+            if self.drag_start_index and self.drag_end_index:
+                widget.tag_remove("sel", "1.0", END)
+                widget.tag_add("sel", self.drag_start_index, self.drag_end_index)
+            
+            return "break"
+        return None
+
+    def on_target_release(self, event: Any) -> Any:
+        widget = event.widget
+        # RESET VISUALS: Always restore cursor
+        if self.original_cursor_color:
+            widget.config(insertbackground=self.original_cursor_color, insertwidth=1)
+            self.original_cursor_color = None
+
+        if self.dragging_tag:
+            # If we never passed the threshold, treat it as a click/selection only
+            if not self.drag_threshold_passed:
+                self.dragging_tag = False
+                self.drag_start_xy = None
+                return "break"
+
+            drop_index = widget.index("insert") 
+            
+            # Prevent dropping inside itself
+            if widget.compare(drop_index, ">=", self.drag_start_index) and \
+               widget.compare(drop_index, "<=", self.drag_end_index):
+                self.dragging_tag = False
+                return "break"
+
+            # Perform Move
+            widget.delete(self.drag_start_index, self.drag_end_index)
+            widget.insert(drop_index, self.dragged_tag_text)
+            
+            self.segment_dirty = True
+            self.dragging_tag = False
+            
+            # Re-apply syntax highlighting immediately after move
+            self.highlight_syntax(widget)
+            
+            # Clear selection
+            widget.tag_remove("sel", "1.0", END)
+            return "break"
+        return None
+
+    # --- MOUSE INTERACTIONS ---
+    def on_target_double_click(self, event: Any) -> Any:
+        """Handles double clicks: Selects tag pairs if clicked on a tag."""
+        try:
+            widget = event.widget
+            index = widget.index(f"@{event.x},{event.y}")
+            tag_info = self.get_tag_at_index(index, widget)
+            
+            if not tag_info: return None # Let default behavior handle non-tag double clicks (Select Word)
+            
+            clicked_tag, t_start, t_end = tag_info
+            
+            mode = self.tag_syntax_var.get()
+            is_closing = clicked_tag.startswith("[/") or clicked_tag.startswith("</")
+            clean_content = re.sub(r"[\[\]<>/]", "", clicked_tag).split(" ")[0]
+            open_char = '[' if mode == "Gomo []" else '<'
+            close_char = ']' if mode == "Gomo []" else '>'
+            
+            start_sel = None
+            end_sel = None
+            
+            if not is_closing:
+                closer = f"{open_char}/{clean_content}{close_char}"
+                search_res = widget.search(closer, t_end, stopindex=END)
+                if search_res:
+                    start_sel = t_start
+                    end_sel = f"{search_res} + {len(closer)}c"
+            else:
+                opener = f"{open_char}{clean_content}" 
+                search_res = widget.search(opener, t_start, stopindex="1.0", backwards=True)
+                if search_res:
+                    start_sel = search_res
+                    end_sel = t_end
+
+            if start_sel and end_sel:
+                widget.tag_remove("sel", "1.0", END)
+                widget.tag_add("sel", start_sel, end_sel)
+                return "break" 
+                
+        except Exception:
+            pass
+        return None
+
+    def on_target_triple_click(self, event: Any) -> Any:
+        """Handles triple clicks: Opens the Pop-out Editor."""
+        try:
+            # Only open popout if clicking the main editor text box
+            if event.widget == self.txt_target:
+                self.open_popout_editor()
+                return "break"
+        except Exception:
+            pass
+        return None
+
+    # --- POPOUT EDITOR ---
+    def open_popout_editor(self) -> None:
+        if not self.current_edit_id: return
+
+        pop = tk.Toplevel(self)
+        pop.title("Expanded Editor")
+        center_window(pop, 800, 500, self)
+        
+        ribbon = ttk.Frame(pop, padding=5)
+        ribbon.pack(fill=X)
+        
+        # Formatting Buttons
+        pop_txt = tk.Text(pop, wrap="word", undo=True, maxundo=50, font=("Helvetica", 11)) # Define first for lambdas
+        
+        ttk.Button(ribbon, text="B", width=2, command=lambda: self.format_text("b", pop_txt), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
+        ttk.Button(ribbon, text="I", width=2, command=lambda: self.format_text("i", pop_txt), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
+        ttk.Button(ribbon, text="U", width=2, command=lambda: self.format_text("u", pop_txt), bootstyle="secondary-outline").pack(side=LEFT, padx=1)
+        
+        btn_tags_pop = ttk.Button(ribbon, text="</>", bootstyle="secondary-outline", command=lambda: self.show_tag_grid_popup(btn_tags_pop, pop_txt))
+        btn_tags_pop.pack(side=LEFT, padx=(5, 1))
+
+        # Save/Cancel Actions
+        def save_and_close():
+            new_text = pop_txt.get("1.0", "end-1c")
+            self.txt_target.delete("1.0", END)
+            self.txt_target.insert("1.0", new_text)
+            self.save_segment() 
+            pop.destroy()
+
+        ttk.Button(ribbon, text="Cancel", command=pop.destroy, bootstyle="secondary").pack(side=RIGHT, padx=5)
+        ttk.Button(ribbon, text="Save & Close", command=save_and_close, bootstyle="success").pack(side=RIGHT)
+
+        # Text Area
+        pop_txt.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        pop_txt.insert("1.0", self.txt_target.get("1.0", "end-1c"))
+        
+        # Configure highlighting
+        pop_txt.tag_configure("tag_highlight", foreground="#00bfff")
+        pop_txt.tag_configure("search_highlight", background="yellow", foreground="black")
+        self.highlight_syntax(pop_txt)
+        self.highlight_search_matches(pop_txt) # Apply search highlights to popout too
+
+        # Apply Drag/Drop & Event Bindings
+        pop_txt.bind("<Button-1>", self.on_target_click)
+        pop_txt.bind("<B1-Motion>", self.on_target_drag)
+        pop_txt.bind("<ButtonRelease-1>", self.on_target_release)
+        pop_txt.bind("<Double-Button-1>", self.on_target_double_click) 
+        pop_txt.bind("<KeyRelease>", lambda e: [self.highlight_syntax(pop_txt), self.highlight_search_matches(pop_txt)])
 
     # --- LAYOUT LOGIC ---
     def toggle_sidebar(self) -> None:
@@ -252,12 +537,11 @@ class EditorTab(ttk.Frame):
 
     # --- TAG LOGIC ---
     def on_syntax_change(self, event: Any) -> None:
-        # We don't need to pre-build the menu anymore, it builds on click
-        pass
+        if self.current_edit_id:
+            self.highlight_syntax()
 
-    def show_tag_grid_popup(self) -> None:
+    def show_tag_grid_popup(self, anchor_btn: ttk.Button, target_widget: tk.Text) -> None:
         """Creates a compact 4-column grid popup for inserting tags."""
-        # 1. Get Data
         syntax = self.tag_syntax_var.get()
         source_text = ""
         if self.current_edit_id:
@@ -272,33 +556,27 @@ class EditorTab(ttk.Frame):
             messagebox.showinfo("Tags", "No tags available for this segment.")
             return
 
-        # 2. Create Popup
         popup = tk.Toplevel(self)
-        popup.overrideredirect(True) # Removes window border
+        popup.overrideredirect(True) 
         popup.attributes('-topmost', True)
         
-        # Position logic (Anchored to Button)
-        x = self.btn_tags.winfo_rootx()
-        y = self.btn_tags.winfo_rooty() + self.btn_tags.winfo_height()
+        x = anchor_btn.winfo_rootx()
+        y = anchor_btn.winfo_rooty() + anchor_btn.winfo_height()
         popup.geometry(f"+{x}+{y}")
         
-        # Close when clicking away
         def close_popup(e):
             if str(e.widget) != str(popup): popup.destroy()
         popup.bind("<FocusOut>", lambda e: popup.destroy())
         popup.focus_set()
 
-        # 3. Build Grid
         frame = ttk.Frame(popup, padding=5, bootstyle="dark")
         frame.pack(fill=BOTH, expand=True)
         
         def add_tag_btn(parent, tag_text, r, c):
-            btn = ttk.Button(parent, text=tag_text, command=lambda t=tag_text: [self.insert_smart_tag(t), popup.destroy()], bootstyle="secondary-outline-sm")
+            btn = ttk.Button(parent, text=tag_text, command=lambda t=tag_text: [self.insert_smart_tag(t, target_widget), popup.destroy()], bootstyle="secondary-outline-sm")
             btn.grid(row=r, column=c, padx=2, pady=2, sticky="ew")
 
         current_row = 0
-        
-        # Standard Tags
         if standard:
             ttk.Label(frame, text="Standard", font=("Helvetica", 8, "bold"), bootstyle="inverse-dark").grid(row=current_row, column=0, columnspan=4, sticky="w", pady=(0, 2))
             current_row += 1
@@ -306,7 +584,6 @@ class EditorTab(ttk.Frame):
                 add_tag_btn(frame, tag, current_row + (i // 4), i % 4)
             current_row += (len(standard) // 4) + 1
 
-        # Context Tags
         if context:
             if standard: 
                 ttk.Separator(frame, orient=HORIZONTAL).grid(row=current_row, column=0, columnspan=4, sticky="ew", pady=5)
@@ -317,7 +594,8 @@ class EditorTab(ttk.Frame):
             for i, tag in enumerate(context):
                 add_tag_btn(frame, tag, current_row + (i // 4), i % 4)
 
-    def insert_smart_tag(self, opener: str) -> None:
+    def insert_smart_tag(self, opener: str, target_widget: Optional[tk.Text] = None) -> None:
+        w = target_widget if target_widget else self.txt_target
         closer = ""
         syntax = self.tag_syntax_var.get()
         if syntax == "Gomo []":
@@ -325,63 +603,35 @@ class EditorTab(ttk.Frame):
         else:
             content = opener.strip("<>"); tag_name = content.split(" ")[0]; closer = f"</{tag_name}>"
         try:
-            if not self.txt_target.tag_ranges("sel"):
-                self.txt_target.insert(tk.INSERT, f"{opener}{closer}")
-                self.txt_target.mark_set(tk.INSERT, f"insert - {len(closer)}c")
+            if not w.tag_ranges("sel"):
+                w.insert(tk.INSERT, f"{opener}{closer}")
+                w.mark_set(tk.INSERT, f"insert - {len(closer)}c")
             else:
-                sel_first = self.txt_target.index("sel.first"); sel_last = self.txt_target.index("sel.last")
-                text = self.txt_target.get(sel_first, sel_last)
+                sel_first = w.index("sel.first"); sel_last = w.index("sel.last")
+                text = w.get(sel_first, sel_last)
                 if text.startswith(opener) and text.endswith(closer):
                     inner = text[len(opener):-len(closer)]
-                    self.txt_target.delete(sel_first, sel_last); self.txt_target.insert(sel_first, inner)
-                    self.txt_target.tag_add("sel", sel_first, f"{sel_first} + {len(inner)}c")
+                    w.delete(sel_first, sel_last); w.insert(sel_first, inner)
+                    w.tag_add("sel", sel_first, f"{sel_first} + {len(inner)}c")
                 else:
-                    self.txt_target.delete(sel_first, sel_last); self.txt_target.insert(sel_first, f"{opener}{text}{closer}")
+                    w.delete(sel_first, sel_last); w.insert(sel_first, f"{opener}{text}{closer}")
+            self.highlight_syntax(w)
         except: pass
-        self.txt_target.focus_set()
+        w.focus_set()
 
-    def format_text(self, tag_type: str) -> None:
+    def format_text(self, tag_type: str, target_widget: Optional[tk.Text] = None) -> None:
         syntax = self.tag_syntax_var.get()
         opener = f"[{tag_type}]" if syntax == "Gomo []" else f"<{tag_type}>"
-        self.insert_smart_tag(opener)
-
-    def on_target_click(self, event: Any) -> None:
-        try:
-            index = self.txt_target.index(f"@{event.x},{event.y}")
-            line_start = f"{index.split('.')[0]}.0"
-            line_text = self.txt_target.get(line_start, f"{line_start} lineend")
-            char_offset = int(index.split('.')[1])
-            mode = self.tag_syntax_var.get()
-            pattern = r"\[/?[a-zA-Z0-9_\-]+[^\]]*\]" if mode == "Gomo []" else r"</?[a-zA-Z0-9]+[^>]*>"
-            open_char = '[' if mode == "Gomo []" else '<'
-            close_char = ']' if mode == "Gomo []" else '>'
-            tags = re.finditer(pattern, line_text)
-            clicked_tag = None; tag_start = None; tag_end = None
-            for match in tags:
-                s, e = match.span()
-                if s <= char_offset <= e: clicked_tag = match.group(); tag_start = s; tag_end = e; break
-            if clicked_tag:
-                is_closing = clicked_tag.startswith(f"{open_char}/")
-                clean_content = re.sub(r"[\[\]<>/]", "", clicked_tag).split(" ")[0]
-                start_sel = None; end_sel = None
-                if not is_closing:
-                    rest_of_line = line_text[tag_end:]
-                    closer = f"{open_char}/{clean_content}{close_char}"
-                    close_idx = rest_of_line.find(closer)
-                    if close_idx != -1: start_sel = f"{index.split('.')[0]}.{tag_start}"; end_sel = f"{index.split('.')[0]}.{tag_end + close_idx + len(closer)}"
-                else:
-                    prev_line = line_text[:tag_start]
-                    opener_base = f"{open_char}{clean_content}"
-                    open_idx = prev_line.rfind(opener_base)
-                    if open_idx != -1: start_sel = f"{index.split('.')[0]}.{open_idx}"; end_sel = f"{index.split('.')[0]}.{tag_end}"
-                if start_sel and end_sel: self.txt_target.tag_remove("sel", "1.0", END); self.txt_target.tag_add("sel", start_sel, end_sel)
-        except: pass
+        self.insert_smart_tag(opener, target_widget)
 
     # --- UNSAVED CHANGES LOGIC ---
     def on_text_modified(self, event: Any) -> None:
         if event.keysym in ("Up", "Down", "Left", "Right", "Control_L", "Control_R", "Alt_L", "Alt_R", "Shift_L", "Shift_R"):
             return
         self.segment_dirty = True
+        self.highlight_syntax(event.widget)
+        # Re-apply search highlighting (optional, might be distracting while typing but ensures correctness)
+        self.highlight_search_matches(event.widget)
 
     def check_unsaved_changes(self) -> bool:
         if self.segment_dirty:
@@ -461,6 +711,9 @@ class EditorTab(ttk.Frame):
             self.edit_status_var.set(rec['status'])
             self.refresh_glossary_view(rec['source'])
             self.segment_dirty = False 
+            
+            self.highlight_syntax()
+            self.highlight_search_matches() # Highlight term on row load
 
     def refresh_glossary_view(self, source_text: str) -> None:
         for i in self.gloss_tree.get_children(): self.gloss_tree.delete(i)
@@ -476,6 +729,7 @@ class EditorTab(ttk.Frame):
         except: pass
         self.txt_target.insert(tk.INSERT, translation)
         self.segment_dirty = True
+        self.highlight_syntax()
 
     def save_segment(self) -> None:
         if not self.current_edit_id: return
@@ -647,3 +901,7 @@ class EditorTab(ttk.Frame):
             tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
             icon = status_map.get(str(rec['status']).lower(), '❓')
             self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
+        
+        # NEW: Trigger highlighting immediately if the current row remains visible
+        if self.current_edit_id:
+            self.highlight_search_matches()
