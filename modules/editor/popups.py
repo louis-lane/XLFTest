@@ -3,7 +3,6 @@ from tkinter import ttk, messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pathlib import Path
-# UPDATED IMPORTS:
 from utils.core import get_target_language, CONFIG
 from utils.gui_utils import center_window
 from utils.glossary import add_term_to_file
@@ -11,9 +10,6 @@ import pandas as pd
 import re
 from lxml import etree
 import shutil
-
-# ... (The rest of the file content remains exactly as it was)
-# You only need to change the lines 'from utils.shared import ...' at the top.
 
 class ToolTip:
     def __init__(self, widget, text):
@@ -256,6 +252,9 @@ class FindReplacePane(ttk.Labelframe):
             # FIXED: Use safe switching method to check for unsaved changes
             success = self.editor.request_file_switch(f_path)
             if not success: return
+        
+        # Pass the search term to the editor so it can highlight it
+        self.editor.temp_search_term = self.e_find.get()
             
         for c in self.editor.tree.get_children():
             if str(self.editor.tree.item(c, 'values')[0]) == str(t_id): 
