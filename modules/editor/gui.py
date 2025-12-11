@@ -190,7 +190,7 @@ class EditorTab(ttk.Frame):
         self.txt_target.pack(fill=BOTH, expand=True)
         # Configure Styles
         self.txt_target.tag_configure("tag_highlight", foreground="#00bfff") 
-        self.txt_target.tag_configure("search_highlight", background="yellow", foreground="black") # NEW: Search style
+        self.txt_target.tag_configure("search_highlight", background="yellow", foreground="black") 
         
         self.txt_target.bind("<Button-3>", self.show_target_menu)
         
@@ -385,7 +385,7 @@ class EditorTab(ttk.Frame):
             index = widget.index(f"@{event.x},{event.y}")
             tag_info = self.get_tag_at_index(index, widget)
             
-            if not tag_info: return None # Let default behavior handle non-tag double clicks
+            if not tag_info: return None # Let default behavior handle non-tag double clicks (Select Word)
             
             clicked_tag, t_start, t_end = tag_info
             
@@ -477,7 +477,7 @@ class EditorTab(ttk.Frame):
         pop_txt.bind("<Button-1>", self.on_target_click)
         pop_txt.bind("<B1-Motion>", self.on_target_drag)
         pop_txt.bind("<ButtonRelease-1>", self.on_target_release)
-        pop_txt.bind("<Double-Button-1>", self.on_target_double_click) # Tag selection works in popout too
+        pop_txt.bind("<Double-Button-1>", self.on_target_double_click) 
         pop_txt.bind("<KeyRelease>", lambda e: [self.highlight_syntax(pop_txt), self.highlight_search_matches(pop_txt)])
 
     # --- LAYOUT LOGIC ---
@@ -901,3 +901,7 @@ class EditorTab(ttk.Frame):
             tag = str(rec['status']).lower().replace(" ", "_").replace("-", "_")
             icon = status_map.get(str(rec['status']).lower(), '❓')
             self.tree.insert("", "end", values=(rec['id'], rec['source'].replace('\n', ' '), rec['target'].replace('\n', ' '), icon), tags=(tag,))
+        
+        # NEW: Trigger highlighting immediately if the current row remains visible
+        if self.current_edit_id:
+            self.highlight_search_matches()
