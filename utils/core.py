@@ -13,6 +13,17 @@ from utils.config_manager import ConfigManager
 # REFACTORED: Instantiating the class handles loading, defaults, and logic automatically.
 CONFIG = ConfigManager()
 
+def generate_fingerprint(text: str) -> str:
+    """
+    Generates a deterministic MD5 hash of the text.
+    Ensures identical strings across different files get the same ID.
+    """
+    if not text:
+        return ""
+    # Strip whitespace to avoid fingerprint mismatches due to formatting
+    clean_text = text.strip()
+    return hashlib.md5(clean_text.encode('utf-8')).hexdigest()
+
 # --- FILE HELPERS ---
 def log_errors(root_path, errors):
     log_path = Path(root_path) / "error_log.txt"
