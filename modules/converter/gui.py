@@ -96,14 +96,23 @@ class ConverterTab(ttk.Frame):
             except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
-    def run_export(self):
+   def run_export(self):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
         if not root_dir: return
         def worker():
             try:
                 fc, lc, ec = export_to_excel_with_glossary(Path(root_dir), self.glossary_path)
-                messagebox.showinfo("Result", f"Processed {fc} files ({lc} langs). Errors: {ec}")
-            except Exception as e: messagebox.showerror("Error", str(e))
+                
+                success_msg = (
+                    f"Processed {fc} files across {lc} languages.\n\n"
+                    f"Generated Language Masters AND 'Global_MT_Input.xlsx' "
+                    f"for project-wide machine translation.\n\n"
+                    f"Errors encountered: {ec}"
+                )
+                messagebox.showinfo("Export Successful", success_msg)
+                
+            except Exception as e: 
+                messagebox.showerror("Export Error", str(e))
         self.start_thread(worker)
 
     def run_import(self):
@@ -174,3 +183,4 @@ class ConverterTab(ttk.Frame):
                 f.write("".join(str(v).ljust(w) for v, w in zip(total_values, widths)) + "\n")
             messagebox.showinfo("Success", f"Report successfully saved to:\n{filepath}")
         except Exception as e: messagebox.showerror("Export Error", f"Could not save the report: {e}")
+
