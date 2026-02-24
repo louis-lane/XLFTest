@@ -1,9 +1,10 @@
 name: Run Unit Tests
 
 on:
+  workflow_dispatch: # Allows you to trigger the test manually from the GitHub UI
   push:
-    # UPDATED: Added 'feature/bulk-actions' to the list
-    branches: [ "main", "Refactoring", "feature/bulk-actions", "feature/drag-drop"]
+    # Added 'Hash-MT' so it runs automatically when you push to this branch
+    branches: [ "main", "Refactoring", "feature/bulk-actions", "feature/drag-drop", "Hash-MT"]
   pull_request:
     branches: [ "main" ]
 
