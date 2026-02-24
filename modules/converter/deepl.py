@@ -42,14 +42,14 @@ def apply_deepl_translations(root_path: Path, deepl_folder_path: Optional[str]) 
             # Phase 3 mapping logic: Dictionary matching
             trans_map = dict(zip(deepl_df.iloc[:, 1].astype(str).str.strip(), deepl_df.iloc[:, 0].astype(str).fillna('')))
 
-            master_wb = pd.ExcelFile(master_file)
             sheet_name = f"{base_lang_code}-Translate_Here"
             
-            if sheet_name not in master_wb.sheet_names:
+            # THE FIX: Let read_excel safely open/close the file for us
+            try:
+                master_df = pd.read_excel(master_file, sheet_name=sheet_name)
+            except ValueError:
                 errors.append(f"Sheet '{sheet_name}' missing in {master_file.name}")
                 continue
-                
-            master_df = pd.read_excel(master_wb, sheet_name=sheet_name)
             
             if 'fingerprint' not in master_df.columns:
                 errors.append(f"Fingerprint column missing in master {master_file.name}. Cannot merge.")
@@ -69,6 +69,7 @@ def apply_deepl_translations(root_path: Path, deepl_folder_path: Optional[str]) 
             if unmatched > 0:
                 errors.append(f"{unmatched} unmatched segments in {master_file.name}")
 
+            # Safe to write now, the file isn't locked!
             with pd.ExcelWriter(master_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
                 master_df.to_excel(writer, sheet_name=sheet_name, index=False)
                 ws = writer.sheets[sheet_name]
