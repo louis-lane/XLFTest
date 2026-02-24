@@ -96,7 +96,7 @@ class ConverterTab(ttk.Frame):
             except Exception as e: messagebox.showerror("Error", str(e))
         self.start_thread(worker)
 
-   def run_export(self):
+    def run_export(self):
         root_dir = filedialog.askdirectory(title="Select Root Folder")
         if not root_dir: return
         def worker():
@@ -183,4 +183,3 @@ class ConverterTab(ttk.Frame):
                 f.write("".join(str(v).ljust(w) for v, w in zip(total_values, widths)) + "\n")
             messagebox.showinfo("Success", f"Report successfully saved to:\n{filepath}")
         except Exception as e: messagebox.showerror("Export Error", f"Could not save the report: {e}")
-
