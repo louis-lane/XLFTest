@@ -28,7 +28,7 @@ jobs:
     # Includes fixes for module discovery (--paths) and themes (--collect-all)
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole --name "LocalizationToolkit" --collect-all ttkbootstrap --paths . --hidden-import modules.converter.gui --hidden-import modules.editor.gui --hidden-import utils.shared main.py
+        pyinstaller --onefile --noconsole --name "LocalizationToolkit" --collect-all ttkbootstrap --paths . --hidden-import modules.converter.gui --hidden-import modules.editor.gui --hidden-import utils.gui_utils main.py
 
     # 5. Upload EXE AND Config
     - name: Upload Artifact
